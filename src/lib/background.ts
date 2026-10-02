@@ -40,10 +40,28 @@ export function ensureWorkers() {
 /** Piggyback a throttled scan onto any API request (works everywhere). */
 export function maybeRunBackgroundScan() {
   ensureWorkers();
-  if (process.env.VERCEL === "1") {
-    const last = g.__strikeLastScan ?? 0;
-    if (Date.now() - last < THROTTLE_MS) return;
-    g.__strikeLastScan = Date.now();
-    after(() => runScan());
-  }
+  if (process.env.VERCEL !== "1") return;
+
+  // Serverless: each instance is cold-started independently, so the throttle must
+  // live in the database - otherwise every cold start re-scans the whole table.
+  const last = Number(g.__strikeLastScan ?? 0);
+  if (last && Date.now() - last < THROTTLE_MS) return;
+  g.__strikeLastScan = Date.now();
+
+  after(async () => {
+    try {
+      const { db } = await import("@/lib/db");
+      const row = await db.setting.findUnique({ where: { key: "bg:lastScanAt" } }).catch(() => null);
+      const lastRun = Number((row?.value as { at?: number })?.at ?? 0);
+      if (lastRun && Date.now() - lastRun < THROTTLE_MS) return;
+      await db.setting.upsert({
+        where: { key: "bg:lastScanAt" },
+        create: { key: "bg:lastScanAt", value: { at: Date.now() } },
+        update: { value: { at: Date.now() } },
+      });
+    } catch (e) {
+      console.error("[bg] throttle check failed:", e);
+    }
+    await runScan();
+  });
 }

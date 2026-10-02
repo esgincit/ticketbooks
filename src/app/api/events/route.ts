@@ -4,6 +4,9 @@ import { subscribe } from "@/lib/events";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// Keep the function next to the database (Supabase: ap-southeast-1)
+export const preferredRegion = ["sin1"];
+
 /** Server-Sent Events stream for realtime notifications & ticket updates */
 export async function GET(req: Request) {
   const user = await getSessionUser();

@@ -8,6 +8,12 @@ import { createTicket } from "@/lib/tickets/service";
 import { serializeTicket } from "@/lib/tickets/serialize";
 import { getSlaPolicy } from "@/lib/sla";
 import { maybeRunBackgroundScan } from "@/lib/background";
+import { remember } from "@/lib/cache";
+import { withDbRetry } from "@/lib/db-retry";
+import type { SessionUser } from "@/lib/auth/session";
+
+// Keep the function next to the database (Supabase: ap-southeast-1)
+export const preferredRegion = ["sin1"];
 
 const listSchema = z.object({
   q: z.string().optional(),
@@ -31,6 +37,11 @@ const listSchema = z.object({
 export const GET = authRoute(async (req, user) => {
   maybeRunBackgroundScan();
   const url = new URL(req.url);
+  const cacheKey = `tickets:${user.id}:${url.search}`;
+  return ok(await remember(cacheKey, 10_000, () => withDbRetry(() => listTickets(url, user))));
+});
+
+async function listTickets(url: URL, user: SessionUser) {
   const p = Object.fromEntries(url.searchParams.entries());
   const params = listSchema.parse(p);
   const page = params.page ?? 1;
@@ -113,12 +124,12 @@ export const GET = authRoute(async (req, user) => {
     db.ticket.count({ where: { AND: and } }),
   ]);
 
-  return ok({
+  return {
     tickets: tickets.map((t) => serializeTicket(t, slaPolicy)),
     total, page, pageSize,
     pages: Math.max(1, Math.ceil(total / pageSize)),
-  });
-});
+  };
+}
 
 const createSchema = z.object({
   projectId: z.string().min(1),

@@ -397,12 +397,12 @@ async function afterUpdate(actor: SessionUser, before: TicketWithRefs, after: Ti
         const resolved = ["Resolved", "Done", "Closed"].includes(after.status.name);
         const reopened = ["Reopened"].includes(after.status.name) || (before.status.category === "DONE" && after.status.category !== "DONE");
         await notify({ userIds: stakeholders, actorId: actor.id, type: "STATUS_CHANGED", title: `Status changed to ${after.status.name}`, body: `${after.key}: ${before.status.name} -> ${after.status.name}`, ticketId: after.id });
-        oldVars.old_value = before.status.name;
         const email = await renderEmail("status_changed", { ...vars, old_value: before.status.name, new_value: after.status.name });
-        for (const uid of stakeholders) {
-          const u = await db.user.findUnique({ where: { id: uid } });
-          if (u) await queueEmail({ to: u.email, templateKey: "status_changed", ...email, ticketId: after.id });
-        }
+        const recipients = await db.user.findMany({ where: { id: { in: stakeholders } }, select: { id: true, email: true } });
+        // Fire in parallel - sequential awaits made every status change crawl
+        await Promise.all(
+          recipients.map((u) => queueEmail({ to: u.email, templateKey: "status_changed", ...email, ticketId: after.id }))
+        );
         if (resolved) {
           await notify({ userIds: [after.reporterId], actorId: actor.id, type: "TICKET_RESOLVED", title: `Your ticket was resolved: ${after.key}`, body: after.title, ticketId: after.id });
           const rEmail = await renderEmail("ticket_resolved", vars);
@@ -419,10 +419,10 @@ async function afterUpdate(actor: SessionUser, before: TicketWithRefs, after: Ti
       case "priority": {
         await notify({ userIds: stakeholders, actorId: actor.id, type: "PRIORITY_CHANGED", title: `Priority changed to ${after.priority.name}`, body: `${after.key}: ${after.title}`, ticketId: after.id });
         const pEmail = await renderEmail("priority_changed", { ...vars, old_value: before.priority?.name ?? "", new_value: after.priority.name });
-        for (const uid of stakeholders) {
-          const u = await db.user.findUnique({ where: { id: uid } });
-          if (u) await queueEmail({ to: u.email, templateKey: "priority_changed", ...pEmail, ticketId: after.id });
-        }
+        const recipients = await db.user.findMany({ where: { id: { in: stakeholders } }, select: { id: true, email: true } });
+        await Promise.all(
+          recipients.map((u) => queueEmail({ to: u.email, templateKey: "priority_changed", ...pEmail, ticketId: after.id }))
+        );
         break;
       }
       case "due date": {
