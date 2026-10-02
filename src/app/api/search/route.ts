@@ -1,14 +1,24 @@
-import { db } from "@/lib/db";
-import { authRoute, ok } from "@/lib/api";
-import { ticketScopeFor } from "@/lib/rbac";
+import { db } from "@/lib/db"
+
+import { authRoute, ok } from "@/lib/api"
+
+import { ticketScopeFor } from "@/lib/rbac"
+
+// Keep the function next to the database (Supabase: ap-southeast-1)
+export const preferredRegion = ["sin1"];
+
 
 /** Global search used by the command palette (Ctrl+K) and quick search */
 export const GET = authRoute(async (req, user) => {
-  const url = new URL(req.url);
-  const q = (url.searchParams.get("q") ?? "").trim();
-  if (!q) return ok({ tickets: [], total: 0 });
+  const url = new URL(req.url)
 
-  const isKeyLike = /^[A-Za-z]+-\d+$/.test(q);
+  const q = (url.searchParams.get("q") ?? "").trim()
+
+  if (!q) return ok({ tickets: [], total: 0 })
+
+
+  const isKeyLike = /^[A-Za-z]+-\d+$/.test(q)
+
   const where = {
     AND: [
       { deletedAt: null },
@@ -20,7 +30,8 @@ export const GET = authRoute(async (req, user) => {
             { description: { contains: q, mode: "insensitive" as const } },
           ] },
     ],
-  };
+  }
+
 
   const tickets = await db.ticket.findMany({
     where,
@@ -31,7 +42,8 @@ export const GET = authRoute(async (req, user) => {
     },
     orderBy: [{ updatedAt: "desc" }],
     take: isKeyLike ? 1 : 15,
-  });
+  })
+
 
   return ok({
     total: tickets.length,
@@ -43,5 +55,7 @@ export const GET = authRoute(async (req, user) => {
       priorityName: t.priority.name, priorityColor: t.priority.color,
       assignee: t.assignee,
     })),
-  });
-});
+  })
+
+})
+

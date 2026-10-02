@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { db } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { randomToken, sha256 } from "./password";
+import { remember } from "@/lib/cache";
 
 export type SessionUser = {
   id: string;
@@ -55,8 +56,14 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
 
+  const hash = sha256(token);
+  // 5s cache: removes a DB round-trip from every request/page render
+  return remember<SessionUser | null>(`sess:${hash}`, 5000, () => loadSessionUser(hash));
+}
+
+async function loadSessionUser(tokenHash: string): Promise<SessionUser | null> {
   const session = await db.session.findUnique({
-    where: { tokenHash: sha256(token) },
+    where: { tokenHash },
     include: {
       user: {
         include: { role: true, team: true, managedTeams: { select: { id: true } } },

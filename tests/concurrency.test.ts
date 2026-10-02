@@ -2,6 +2,7 @@ import "dotenv/config";
 import { describe, it, expect, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { withDbRetry } from "@/lib/db-retry";
 
 /**
  * Integration tests against the real database.
@@ -111,11 +112,12 @@ describe("Ticket numbering", () => {
     const type = await db.ticketType.findFirstOrThrow();
 
     const createOne = async () => {
-      // Mirrors production: single atomic UPDATE...RETURNING per allocation (pooler-safe)
-      const rows = await db.$queryRaw<{ num: number }[]>`
+      // Mirrors production: single atomic UPDATE...RETURNING per allocation (pooler-safe).
+      // The shared pooler occasionally refuses bursts of parallel connections.
+      const rows = await withDbRetry(() => db.$queryRaw<{ num: number }[]>`
         UPDATE "Project" SET "nextNumber" = "nextNumber" + 1
         WHERE id = ${project.id}
-        RETURNING "nextNumber" AS num`;
+        RETURNING "nextNumber" AS num`);
       const num = Number(rows[0].num);
       return db.ticket.create({
         data: {

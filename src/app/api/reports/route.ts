@@ -6,6 +6,9 @@ import { toCsv } from "@/lib/utils";
 
 const DAY = 86400000;
 
+// Keep the function next to the database (Supabase: ap-southeast-1)
+export const preferredRegion = ["sin1"];
+
 export const GET = authRoute(async (req, user) => {
   if (!can(user, "report.view.team") && !can(user, "report.view.all") && !isSuperAdmin(user)) throw forbidden("You do not have access to reports");
   const url = new URL(req.url);
