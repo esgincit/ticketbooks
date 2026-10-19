@@ -14,7 +14,8 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (!hasSession && !pathname.startsWith("/api/")) {
+  // /.well-known: public OAuth discovery metadata for MCP clients
+  if (!hasSession && !pathname.startsWith("/api/") && !pathname.startsWith("/.well-known/")) {
     const url = new URL("/login", req.url);
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);

@@ -19,28 +19,24 @@ export const PATCH = authRoute(async (req, actor) => {
       if (!ticket) ticket = await db.ticket.findFirst({ where: { id: key, deletedAt: null } });
       if (!ticket) throw new Error("Ticket not found");
 
+      // Every action goes through the service layer so the same permission
+      // checks apply as for single-ticket edits (ticket.delete.team, ticket.assign, edit rights)
+      const { updateTicket, assignTicket, archiveTicket } = await import("@/lib/tickets/service");
       if (data.action === "delete") {
-        await db.$transaction(async (tx) => {
-          await tx.ticket.update({ where: { id: ticket.id }, data: { deletedAt: new Date() } });
-          await tx.ticketHistory.create({ data: { ticketId: ticket.id, userId: actor.id, field: "deleted", newValue: "archived" } });
-        });
+        await archiveTicket(actor, ticket.key);
+      } else if (data.action === "assign") {
+        await assignTicket(actor, ticket.key, data.value || null);
       } else if (data.action === "label") {
         if (!data.value) throw new Error("Label required");
-        await db.ticketLabel.upsert({
-          where: { ticketId_labelId: { ticketId: ticket.id, labelId: data.value } },
-          create: { ticketId: ticket.id, labelId: data.value },
-          update: {},
-        });
-        await db.ticketHistory.create({ data: { ticketId: ticket.id, userId: actor.id, field: "labels", newValue: data.value } });
+        const current = await db.ticketLabel.findMany({ where: { ticketId: ticket.id }, select: { labelId: true } });
+        const labelIds = [...new Set([...current.map((l) => l.labelId), data.value])];
+        await updateTicket(actor, ticket.key, { labelIds });
+      } else if (data.action === "project") {
+        // Moving changes the ticket key/numbering; not supported (previously a silent no-op)
+        throw new Error("Moving tickets between projects is not supported");
       } else {
-        const patch: Record<string, unknown> =
-          data.action === "assign" ? { assigneeId: data.value || null }
-          : data.action === "status" ? { statusId: data.value }
-          : data.action === "priority" ? { priorityId: data.value }
-          : { projectId: data.value };
-        // Reuse service for audit + notifications on assign/status/priority
-        const { updateTicket } = await import("@/lib/tickets/service");
-        await updateTicket(actor, ticket.key, patch as never);
+        if (!data.value) throw new Error("Value required");
+        await updateTicket(actor, ticket.key, data.action === "status" ? { statusId: data.value } : { priorityId: data.value });
       }
       results.updated += 1;
     } catch (e) {

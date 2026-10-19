@@ -1,4 +1,5 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
+import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { randomToken, sha256 } from "./password";
@@ -52,6 +53,10 @@ export async function destroySession() {
 }
 
 export async function getSessionUser(): Promise<SessionUser | null> {
+  // AI tools (MCP / OAuth) send a Bearer token; the browser app never does.
+  const bearer = await getBearerUser();
+  if (bearer) return bearer;
+
   const jar = await cookies();
   const token = jar.get(SESSION_COOKIE)?.value;
   if (!token) return null;
@@ -61,14 +66,35 @@ export async function getSessionUser(): Promise<SessionUser | null> {
   return remember<SessionUser | null>(`sess:${hash}`, 5000, () => loadSessionUser(hash));
 }
 
+/** User behind an `Authorization: Bearer <mcp access token>` header, if valid */
+export async function getBearerUser(): Promise<SessionUser | null> {
+  const auth = (await headers()).get("authorization");
+  const token = auth?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  if (!token) return null;
+  const hash = sha256(token);
+  return remember<SessionUser | null>(`mcp:${hash}`, 5000, () => loadMcpUser(hash));
+}
+
+/** Optional ALLOWED_EMAIL_DOMAINS="acme.com,acme.io" limits AI-tool access to company emails */
+export function isCompanyEmail(email: string): boolean {
+  const domains = (process.env.ALLOWED_EMAIL_DOMAINS ?? "").split(",").map((d) => d.trim().toLowerCase()).filter(Boolean);
+  return domains.length === 0 || domains.includes(email.split("@")[1]?.toLowerCase() ?? "");
+}
+
+const userInclude = { role: true, team: true, managedTeams: { select: { id: true } } } as const;
+
+async function loadMcpUser(tokenHash: string): Promise<SessionUser | null> {
+  const t = await db.mcpToken.findUnique({ where: { tokenHash }, include: { user: { include: userInclude } } });
+  if (!t || t.kind !== "access" || t.revokedAt || t.expiresAt < new Date()) return null;
+  if (t.user.status === "DISABLED" || !isCompanyEmail(t.user.email)) return null;
+  db.mcpToken.update({ where: { id: t.id }, data: { lastUsedAt: new Date() } }).catch(() => {});
+  return toSessionUser(t.user);
+}
+
 async function loadSessionUser(tokenHash: string): Promise<SessionUser | null> {
   const session = await db.session.findUnique({
     where: { tokenHash },
-    include: {
-      user: {
-        include: { role: true, team: true, managedTeams: { select: { id: true } } },
-      },
-    },
+    include: { user: { include: userInclude } },
   });
   if (!session) return null;
   if (session.expiresAt < new Date()) {
@@ -76,8 +102,10 @@ async function loadSessionUser(tokenHash: string): Promise<SessionUser | null> {
     return null;
   }
   if (session.user.status === "DISABLED") return null;
+  return toSessionUser(session.user);
+}
 
-  const u = session.user;
+function toSessionUser(u: Prisma.UserGetPayload<{ include: typeof userInclude }>): SessionUser {
   return {
     id: u.id,
     email: u.email,
