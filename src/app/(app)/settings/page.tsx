@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { UserCog, Building2, Mail, ShieldCheck, Send, Timer } from "lucide-react";
+import { UserCog, Building2, Mail, ShieldCheck, Send, Timer, Bot } from "lucide-react";
 import { api, ApiError } from "@/lib/client";
 import { Input, Select, Label, Skeleton } from "@/components/ui/field";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ const TABS = [
   { key: "sla", label: "SLA", icon: Timer, perm: "settings.manage" },
   { key: "email", label: "Email", icon: Mail, perm: "settings.manage" },
   { key: "security", label: "Security", icon: ShieldCheck },
+  { key: "ai", label: "AI tools", icon: Bot },
 ] as const;
 
 export default function SettingsPage() {
@@ -46,6 +47,7 @@ export default function SettingsPage() {
       {tab === "sla" && <SlaTab />}
       {tab === "email" && <EmailTab />}
       {tab === "security" && <SecurityTab />}
+      {tab === "ai" && <AiToolsTab />}
     </div>
   );
 }
@@ -440,6 +442,59 @@ function SecurityTab() {
           <li>TOTP-based MFA is architected via the users table (mfaSecret) and can be enforced per role.</li>
           <li>All logins, failed logins and administrative actions are recorded in the <a href="/audit-logs" className="font-medium text-primary hover:underline">Audit Logs</a>.</li>
         </ul>
+      </section>
+    </div>
+  );
+}
+
+function AiToolsTab() {
+  const [rows, setRows] = useState<{ clientId: string; name: string; connectedAt: string }[] | null>(null);
+  const { toast } = useToast();
+  const command = `claude mcp add --transport http strike ${typeof window === "undefined" ? "" : window.location.origin}/api/mcp`;
+
+  const load = () => api<{ connections: NonNullable<typeof rows> }>("/api/oauth/connections").then((d) => setRows(d.connections)).catch(() => setRows([]));
+  useEffect(() => { void load(); }, []);
+
+  const disconnect = async (clientId: string, name: string) => {
+    try {
+      await api(`/api/oauth/connections?clientId=${encodeURIComponent(clientId)}`, { method: "DELETE" });
+      toast({ title: `${name} disconnected`, variant: "success" });
+      await load();
+    } catch (e) {
+      toast({ title: e instanceof ApiError ? e.message : "Failed", variant: "error" });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-xl border bg-card p-5 shadow-sm">
+        <h2 className="mb-2 text-sm font-semibold">Connect Claude Code</h2>
+        <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+          Run this in a terminal, then in Claude Code open <b>/mcp</b>, choose <b>strike</b> and <b>Authenticate</b>.
+          You will sign in here and approve access. The AI acts as you, with exactly your permissions.
+        </p>
+        <div className="flex items-center gap-2">
+          <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-lg border bg-muted/50 px-3 py-2 font-mono text-xs">{command}</code>
+          <Button variant="secondary" onClick={() => { void navigator.clipboard?.writeText(command); toast({ title: "Copied", variant: "success" }); }}>Copy</Button>
+        </div>
+      </section>
+
+      <section className="rounded-xl border bg-card p-5 shadow-sm">
+        <h2 className="mb-3 text-sm font-semibold">Connected AI tools</h2>
+        {rows === null ? <Skeleton className="h-16" /> : rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No AI tools are connected to your account.</p>
+        ) : (
+          <ul className="divide-y">
+            {rows.map((r) => (
+              <li key={r.clientId} className="flex items-center gap-3 py-2.5 text-sm">
+                <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-medium">{r.name}</span>
+                <span className="hidden text-xs text-muted-foreground sm:inline">Connected {new Date(r.connectedAt).toLocaleString()}</span>
+                <Button variant="secondary" onClick={() => void disconnect(r.clientId, r.name)}>Disconnect</Button>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
     </div>
   );

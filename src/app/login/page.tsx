@@ -21,7 +21,12 @@ export default function LoginPage() {
     setError(null);
     try {
       await api("/api/auth/login", { method: "POST", json: { email, password } });
-      router.push(new URLSearchParams(window.location.search).get("next") ?? "/dashboard");
+      const next = new URLSearchParams(window.location.search).get("next") ?? "/dashboard";
+      // Same-site paths only (blocks open redirects like //evil.com)
+      const safeNext = next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\") ? next : "/dashboard";
+      // API targets (e.g. OAuth authorize for AI tools) need a full page load
+      if (safeNext.startsWith("/api/")) return window.location.assign(safeNext);
+      router.push(safeNext);
       router.refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to sign in. Try again.");

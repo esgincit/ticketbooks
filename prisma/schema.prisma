@@ -61,6 +61,7 @@ model User {
   prefs           Json      @default("{}")
 
   sessions         Session[]
+  mcpTokens        McpToken[]
   passwordResets   PasswordResetToken[]
   reportedTickets  Ticket[]             @relation("Reporter")
   assignedTickets  Ticket[]             @relation("Assignee")
@@ -91,6 +92,34 @@ model Session {
   userAgent String?
   expiresAt DateTime
   createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// OAuth for the MCP endpoint (/api/mcp): AI tools register as public clients
+// (PKCE, no secret) and get tokens only after the user signs in to Strike.
+model McpClient {
+  id           String     @id @default(cuid())
+  name         String
+  redirectUris Json
+  tokens       McpToken[]
+  createdAt    DateTime   @default(now())
+}
+
+model McpToken {
+  id            String    @id @default(cuid())
+  tokenHash     String    @unique
+  kind          String // code | access | refresh
+  userId        String
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clientId      String
+  client        McpClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  codeChallenge String?
+  redirectUri   String?
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  lastUsedAt    DateTime?
+  createdAt     DateTime  @default(now())
 
   @@index([userId])
 }

@@ -213,6 +213,25 @@ On self-hosted/long-running servers no cron is needed; the workers start automat
 5. Mount a persistent volume for uploads or swap `src/app/api/tickets/[key]/attachments` storage for S3 (single file).
 6. The SSE endpoint (`/api/events`) requires buffering disabled on reverse proxies (`X-Accel-Buffering: no` header is already sent; disable proxy buffering for `/api/events`).
 
+## AI tools (MCP server)
+
+Strike exposes a remote MCP server at `/api/mcp` so Claude Code (or any MCP client) can do everything the web app does: tickets, comments, attachments, projects, teams, users, notifications, reports, audit and settings (45 tools, `src/lib/mcp/tools.ts`).
+
+```bash
+claude mcp add --transport http strike https://<your-domain>/api/mcp
+# then inside Claude Code: /mcp -> strike -> Authenticate
+```
+
+The browser opens the Strike login; after signing in, the user approves the tool and Claude Code receives a token. Access rules:
+
+- Only signed-in Strike users can connect (OAuth 2.1 + PKCE). Disabled users lose access immediately.
+- Each tool runs the same route handler as the web app, so the AI has exactly the user's role permissions.
+- Optional `ALLOWED_EMAIL_DOMAINS="acme.com,acme.io"` restricts AI access to company email domains.
+- Self-registered clients may only redirect to `http://localhost` (CLI tools like Claude Code). Web-based clients need their callback host in `MCP_ALLOWED_REDIRECT_HOSTS` (e.g. `claude.ai` for claude.ai connectors); this blocks consent-phishing via look-alike apps.
+- Tokens are stored hashed; access tokens last 1 hour (auto-refreshed), refresh tokens 30 days and rotate on use.
+- Connects/disconnects are audit-logged. Revoke with the `disconnect_ai_tool` tool or `DELETE /api/oauth/connections?clientId=...`.
+- Requires the `20261019000000_mcp_oauth` migration (`npx prisma migrate deploy`).
+
 ## Security model
 
 - Passwords hashed with bcrypt (cost 10); reset tokens stored hashed with single-use semantics and session invalidation

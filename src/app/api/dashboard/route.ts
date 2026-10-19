@@ -147,8 +147,8 @@ async function buildDashboard(user: SessionUser) {
       trend,
       avgResolutionDays: avgResolutionDays !== null ? Number(avgResolutionDays.toFixed(1)) : null,
       recent: recent.map((t) => ({
-        key: t.key, title: t.title, status: t.status.name, statusColor: t.status.color,
-        priority: t.priority.name, priorityColor: t.priority.color, typeIcon: t.type.icon, typeName: t.type.name,
+        key: t.key, title: t.title, status: { name: t.status.name, color: t.status.color },
+        priority: { name: t.priority.name, color: t.priority.color }, typeIcon: t.type.icon, typeName: t.type.name,
         projectKey: t.project.key, assignee: t.assignee, updatedAt: t.updatedAt,
       })),
     };
@@ -180,7 +180,7 @@ async function buildDashboard(user: SessionUser) {
   return {
     view: "employee" as const,
     cards: { myOpen, myOverdue, myDueToday, myHighPriority, myCompleted, availableWork },
-    recentlyAssigned: recentlyAssigned.map((t) => ({ key: t.key, title: t.title, status: t.status.name, statusColor: t.status.color, priority: t.priority.name, priorityColor: t.priority.color, typeIcon: t.type.icon, typeName: t.type.name, projectKey: t.project.key, createdAt: t.createdAt })),
-    recentlyUpdated: recentlyUpdated.map((t) => ({ key: t.key, title: t.title, status: t.status.name, statusColor: t.status.color, priority: t.priority.name, priorityColor: t.priority.color, typeIcon: t.type.icon, typeName: t.type.name, projectKey: t.project.key, updatedAt: t.updatedAt })),
+    recentlyAssigned: recentlyAssigned.map((t) => ({ key: t.key, title: t.title, status: { name: t.status.name, color: t.status.color }, priority: { name: t.priority.name, color: t.priority.color }, typeIcon: t.type.icon, typeName: t.type.name, projectKey: t.project.key, createdAt: t.createdAt })),
+    recentlyUpdated: recentlyUpdated.map((t) => ({ key: t.key, title: t.title, status: { name: t.status.name, color: t.status.color }, priority: { name: t.priority.name, color: t.priority.color }, typeIcon: t.type.icon, typeName: t.type.name, projectKey: t.project.key, updatedAt: t.updatedAt })),
   };
 }
