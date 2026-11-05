@@ -16,7 +16,7 @@ export const POST = publicRoute(async (req) => {
 
   await db.$transaction([
     db.user.update({ where: { id: me.id }, data: { passwordHash: await hashPassword(body.newPassword) } }),
-    ...revokeUserCredentials(me.id),
+    ...revokeUserCredentials(me.id, me.email),
   ]);
   await createSession(me.id); // signed out everywhere else, but this browser stays signed in
   await db.auditLog.create({ data: { userId: me.id, action: "PASSWORD_CHANGED", entityType: "User", entityId: me.id } });

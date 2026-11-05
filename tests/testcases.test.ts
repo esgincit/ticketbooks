@@ -238,6 +238,17 @@ describe("ticket privacy", () => {
     expect(await db.passwordResetToken.count({ where: { userId: viewer.id } })).toBe(0);
   });
 
+  it("cancels unused emailed reset codes when a user is signed out everywhere", async () => {
+    const real = await db.user.findUniqueOrThrow({ where: { id: viewer.id } });
+    const otp = await db.otpToken.create({ data: { email: real.email, otpHash: "x", purpose: "password_reset", expiresAt: new Date(Date.now() + 600000) } });
+    const raw = `otp-reset-${stamp}`;
+    await db.passwordResetToken.create({ data: { userId: viewer.id, tokenHash: sha256(raw), expiresAt: new Date(Date.now() + 3600000) } });
+    const res = await resetPassword(new Request("http://t/api/auth/reset-password", { method: "POST", body: JSON.stringify({ token: raw, newPassword: "a-new-password-3" }) }));
+    expect((await res.json()).success).toBe(true);
+    expect((await db.otpToken.findUniqueOrThrow({ where: { id: otp.id } })).expiresAt.getTime()).toBeLessThanOrEqual(Date.now());
+    await db.otpToken.delete({ where: { id: otp.id } });
+  });
+
   it("won't let a reset link re-enable a disabled account", async () => {
     const raw = `disabled-token-${stamp}`;
     await db.user.update({ where: { id: viewer.id }, data: { status: "DISABLED" } });

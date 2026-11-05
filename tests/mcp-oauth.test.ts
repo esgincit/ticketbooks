@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { describe, it, expect, afterEach } from "vitest";
-import { isAllowedRedirectUri, verifyPkce } from "@/lib/auth/oauth";
+import { isAllowedRedirectUri, knownConnectorName, matchesRegisteredRedirect, verifyPkce } from "@/lib/auth/oauth";
 import { isCompanyEmail } from "@/lib/auth/session";
 import { TOOLS } from "@/lib/mcp/tools";
 
@@ -23,6 +23,44 @@ describe("MCP OAuth helpers", () => {
     expect(isAllowedRedirectUri("https://claude.ai/api/mcp/auth_callback")).toBe(true);
     expect(isAllowedRedirectUri("https://claude.ai.evil.com/cb")).toBe(false);
     expect(isAllowedRedirectUri("https://claude.ai/cb#frag")).toBe(false);
+  });
+
+  it("allows ChatGPT's exact return address, and nothing else on chatgpt.com", () => {
+    expect(isAllowedRedirectUri("https://chatgpt.com/connector_platform_oauth_redirect")).toBe(true);
+    expect(isAllowedRedirectUri("https://chatgpt.com/connector_platform_oauth_redirect/x")).toBe(false);
+    expect(isAllowedRedirectUri("https://chatgpt.com/connector_platform_oauth_redirect?x=1")).toBe(false);
+    expect(isAllowedRedirectUri("https://chatgpt.com/evil")).toBe(false);
+    expect(isAllowedRedirectUri("http://chatgpt.com/connector_platform_oauth_redirect")).toBe(false);
+  });
+
+  it("names ChatGPT from its address, and can be switched off", () => {
+    const uri = "https://chatgpt.com/connector_platform_oauth_redirect";
+    expect(knownConnectorName(uri)).toBe("ChatGPT");
+    expect(knownConnectorName("http://127.0.0.1:5555/cb")).toBeNull();
+    process.env.MCP_DISABLE_CHATGPT = "true";
+    expect(knownConnectorName(uri)).toBeNull();
+    expect(isAllowedRedirectUri(uri)).toBe(false);
+    delete process.env.MCP_DISABLE_CHATGPT;
+    expect(isAllowedRedirectUri(uri)).toBe(true);
+  });
+
+  it("accepts any port on the registered loopback address only", () => {
+    const reg = ["http://127.0.0.1:5555/callback", "http://localhost/cb"];
+    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1:5555/callback")).toBe(true);
+    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1:61234/callback")).toBe(true);
+    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1/callback")).toBe(true);
+    expect(matchesRegisteredRedirect(reg, "http://localhost:49152/cb")).toBe(true);
+    // Different path, host or scheme is not the registered address
+    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1:61234/other")).toBe(false);
+    expect(matchesRegisteredRedirect(reg, "http://localhost:61234/callback")).toBe(false);
+    expect(matchesRegisteredRedirect(reg, "https://127.0.0.1:61234/callback")).toBe(false);
+    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1.evil.com:5555/callback")).toBe(false);
+    expect(matchesRegisteredRedirect(reg, "http://evil.com:5555/callback")).toBe(false);
+    expect(matchesRegisteredRedirect(reg, "not a url")).toBe(false);
+    // Web addresses stay exact, port included
+    const web = ["https://claude.ai/cb"];
+    expect(matchesRegisteredRedirect(web, "https://claude.ai/cb")).toBe(true);
+    expect(matchesRegisteredRedirect(web, "https://claude.ai:8443/cb")).toBe(false);
   });
 
   afterEach(() => { delete process.env.ALLOWED_EMAIL_DOMAINS; delete process.env.MCP_ALLOWED_REDIRECT_HOSTS; });

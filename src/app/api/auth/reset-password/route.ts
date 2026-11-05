@@ -19,15 +19,16 @@ export const POST = publicRoute(
       return ok({ success: false, reason: "This reset link is invalid or has expired. Please request a new one." });
     }
     // A reset activates invited users, but must never re-enable a disabled account
-    const user = await db.user.findUnique({ where: { id: row.userId }, select: { status: true } });
+    const user = await db.user.findUnique({ where: { id: row.userId }, select: { status: true, email: true } });
     if (!user || user.status === "DISABLED") {
       return ok({ success: false, reason: "Account is disabled." });
     }
 
     await db.$transaction([
-      db.user.update({ where: { id: row.userId }, data: { passwordHash: await hashPassword(body.newPassword), status: "ACTIVE", emailVerifiedAt: new Date() } }),
+      // The status condition covers an admin disabling the user at this very moment
+      db.user.update({ where: { id: row.userId, status: { not: "DISABLED" } }, data: { passwordHash: await hashPassword(body.newPassword), status: "ACTIVE", emailVerifiedAt: new Date() } }),
       db.passwordResetToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
-      ...revokeUserCredentials(row.userId),
+      ...revokeUserCredentials(row.userId, user.email),
     ]);
     await audit({ userId: row.userId, action: "PASSWORD_RESET", entityType: "User", entityId: row.userId, ip: req.headers.get("x-forwarded-for") ?? undefined });
 
