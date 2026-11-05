@@ -250,7 +250,7 @@ Don't put real secrets in steps: every signed-in user and AI tool can read them.
 
 ### Reporting results from CI
 
-Create a token under Settings > AI tools > CI tokens and store it as a pipeline secret. It acts as the user who created it, works only on this endpoint, and is always recorded as an automated run:
+Create a token under Settings > AI tools > CI tokens and store it as a pipeline secret. It acts as the user who created it, works only on this endpoint, and is always recorded as an automated run. Changing or resetting that user's password, or disabling them, signs them out everywhere and revokes their tokens and AI tool connections, so pipelines need a new token afterwards:
 
 ```bash
 curl -X POST https://<your-domain>/api/test-results \

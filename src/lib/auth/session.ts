@@ -82,6 +82,19 @@ export function isCompanyEmail(email: string): boolean {
 }
 
 /**
+ * Signs a user out everywhere: browser sessions, AI tools and CI tokens.
+ * Returns Prisma operations to run inside the same $transaction as the credential change.
+ */
+export function revokeUserCredentials(userId: string) {
+  const now = new Date();
+  return [
+    db.session.deleteMany({ where: { userId } }),
+    db.mcpToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
+    db.ciToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
+  ];
+}
+
+/**
  * User behind a CI token. Deliberately separate from getSessionUser: a CI token
  * only works on routes that ask for it, so a leaked one can't reach anything else.
  */

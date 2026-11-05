@@ -4,6 +4,7 @@ import { authRoute, parseBody, ok } from "@/lib/api";
 import { forbidden, notFound, badRequest } from "@/lib/errors";
 import { can } from "@/lib/rbac";
 import { hashPassword, randomToken } from "@/lib/auth/password";
+import { revokeUserCredentials } from "@/lib/auth/session";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -68,19 +69,20 @@ export const PATCH = authRoute(async (req, actor, ctx: Ctx) => {
   if (data.resetPassword) {
     newPassword = `St-${randomToken(9)}!`;
   }
-  const updated = await db.user.update({
-    where: { id },
-    data: {
-      firstName: data.firstName, lastName: data.lastName,
-      jobTitle: data.jobTitle, phone: data.phone, timeZone: data.timeZone,
-      roleId: data.roleId, teamId: data.teamId, status: data.status,
-      ...(newPassword ? { passwordHash: await hashPassword(newPassword) } : {}),
-    },
-  });
-  // Re-enabling a user or handing back a new password must not revive old pipeline access
-  if (newPassword || data.status === "DISABLED") {
-    await db.ciToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
-  }
+  const passwordHash = newPassword ? await hashPassword(newPassword) : undefined;
+  // Re-enabling a user or handing back a new password must not revive old access
+  const [updated] = await db.$transaction([
+    db.user.update({
+      where: { id },
+      data: {
+        firstName: data.firstName, lastName: data.lastName,
+        jobTitle: data.jobTitle, phone: data.phone, timeZone: data.timeZone,
+        roleId: data.roleId, teamId: data.teamId, status: data.status,
+        passwordHash,
+      },
+    }),
+    ...(newPassword || data.status === "DISABLED" ? revokeUserCredentials(id) : []),
+  ]);
   await db.auditLog.create({
     data: { userId: actor.id, action: data.status === "DISABLED" ? "USER_DISABLED" : "USER_UPDATED", entityType: "User", entityId: id, metadata: { fields: Object.keys(data) } },
   });

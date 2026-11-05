@@ -487,7 +487,7 @@ function CiTokensSection() {
     <section className="rounded-xl border bg-card p-5 shadow-sm">
       <h2 className="mb-2 text-sm font-semibold">CI tokens for test results</h2>
       <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
-        Lets a pipeline post test results as you. A token only works for posting results, not for anything else. Store it as a pipeline secret.
+        Lets a pipeline post test results as you. A token only works for posting results, not for anything else. Store it as a pipeline secret. Changing your password revokes your tokens and disconnects your AI tools, so you'll need to create new ones.
       </p>
       <form onSubmit={create} className="flex flex-wrap items-end gap-2">
         <div className="min-w-48 flex-1">

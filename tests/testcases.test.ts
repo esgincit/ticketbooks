@@ -3,7 +3,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import type { SessionUser } from "@/lib/rbac";
 import * as svc from "@/lib/testcases/service";
-import { canViewTicket } from "@/lib/tickets/service";
+import { addComment, canViewTicket, claimTicket, setWatching } from "@/lib/tickets/service";
 import { sha256 } from "@/lib/auth/password";
 import { POST as resetPassword } from "@/app/api/auth/reset-password/route";
 
@@ -205,15 +205,36 @@ describe("ticket privacy", () => {
     await db.comment.delete({ where: { id: comment.id } });
   });
 
-  it("revokes CI tokens when a password is reset", async () => {
+  it("won't let a user give themselves access to a hidden ticket", async () => {
+    const commenter = { ...viewer, permissions: ["ticket.comment", "ticket.claim"] };
+    await expect(addComment(commenter, ticketKey, "let me in")).rejects.toThrow(/access/);
+    await expect(setWatching(commenter, ticketKey, true)).rejects.toThrow(/access/);
+    await expect(claimTicket(commenter, ticketKey)).rejects.toThrow(/access/);
+    expect(await canViewTicket(commenter, ticketId)).toBe(false);
+    expect(await db.comment.count({ where: { ticketId } })).toBe(0);
+    expect((await db.ticket.findUniqueOrThrow({ where: { id: ticketId } })).assigneeId).toBeNull();
+
+    // Those who can see it still can, and anyone can stop watching
+    await expect(setWatching(commenter, ticketKey, false)).resolves.toBeTruthy();
+    const comment = await addComment(admin, ticketKey, "fine");
+    await db.comment.delete({ where: { id: comment.id } });
+  });
+
+  it("signs a user out everywhere when a password is reset", async () => {
     const future = new Date(Date.now() + 3600000);
     const ci = await db.ciToken.create({ data: { name: "t", tokenHash: `ci-${stamp}`, userId: viewer.id, expiresAt: future } });
+    const client = await db.mcpClient.create({ data: { name: `tc-${stamp}`, redirectUris: [] } });
+    const mcp = await db.mcpToken.create({ data: { tokenHash: `mcp-${stamp}`, kind: "refresh", userId: viewer.id, clientId: client.id, expiresAt: future } });
+    await db.session.create({ data: { tokenHash: `sess-${stamp}`, userId: viewer.id, expiresAt: future } });
     await db.passwordResetToken.create({ data: { userId: viewer.id, tokenHash: sha256(`reset-token-${stamp}`), expiresAt: future } });
     const res = await resetPassword(new Request("http://t/api/auth/reset-password", {
       method: "POST", body: JSON.stringify({ token: `reset-token-${stamp}`, newPassword: "a-new-password-1" }),
     }));
     expect((await res.json()).success).toBe(true);
     expect((await db.ciToken.findUniqueOrThrow({ where: { id: ci.id } })).revokedAt).not.toBeNull();
+    expect((await db.mcpToken.findUniqueOrThrow({ where: { id: mcp.id } })).revokedAt).not.toBeNull();
+    expect(await db.session.count({ where: { userId: viewer.id } })).toBe(0);
+    await db.mcpClient.delete({ where: { id: client.id } });
   });
 });
 
