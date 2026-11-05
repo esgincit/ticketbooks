@@ -6,7 +6,7 @@ import { queueEmail } from "@/lib/email/send";
 import { renderEmail } from "@/lib/email/templates";
 import { APP_URL } from "@/lib/config";
 import { conflict, forbidden, notFound, badRequest } from "@/lib/errors";
-import { can } from "@/lib/rbac";
+import { can, ticketScopeFor } from "@/lib/rbac";
 import type { SessionUser } from "@/lib/auth/session";
 import { excerpt, fmtDate, stripHtml } from "@/lib/utils";
 
@@ -36,6 +36,13 @@ export async function getTicketOr404(keyOrId: string): Promise<TicketWithRefs> {
   }
   if (!t) throw notFound("Ticket not found");
   return t;
+}
+
+/** Same rule everywhere a ticket's contents are read: in the user's scope, or they have commented on it */
+export async function canViewTicket(user: SessionUser, ticketId: string): Promise<boolean> {
+  const scoped = await db.ticket.count({ where: { AND: [{ id: ticketId }, ticketScopeFor(user)] } });
+  if (scoped > 0) return true;
+  return Boolean(await db.comment.findFirst({ where: { ticketId, authorId: user.id }, select: { id: true } }));
 }
 
 async function findTicketByKeyOrId(keyOrId: string) {
