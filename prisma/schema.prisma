@@ -76,6 +76,11 @@ model User {
   emailEvents      EmailEvent[]         @relation("EmailUploader")
   projectMembers   ProjectMember[]
   ledProjects      Project[]            @relation("ProjectLead")
+  ownedTestCases   TestCase[]           @relation("TestCaseOwner")
+  ownedTestPlans   TestPlan[]           @relation("TestPlanOwner")
+  testPoints       TestPoint[]          @relation("TestPointTester")
+  testResults      TestResult[]         @relation("TestResultExecutor")
+  ciTokens         CiToken[]
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -168,6 +173,9 @@ model Project {
   sprints     Sprint[]
   labels      Label[]
   automations AutomationRule[]
+  testCounter TestCounter?
+  testCases   TestCase[]
+  testPlans   TestPlan[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -203,6 +211,7 @@ model Priority {
   isDefault Boolean  @default(false)
   isSystem  Boolean  @default(false)
   tickets   Ticket[]
+  testCases TestCase[]
 }
 
 model TicketType {
@@ -225,6 +234,7 @@ model Sprint {
   projectId String
   project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   tickets   Ticket[]
+  testPlans TestPlan[]
   createdAt DateTime @default(now())
 }
 
@@ -289,6 +299,8 @@ model Ticket {
   notifications   Notification[]
   emailEvents     EmailEvent[]
   customValues    CustomFieldValue[]
+  testCaseLinks   TestCaseTicket[]
+  testBugResults  TestResult[]
   deletedAt       DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
@@ -470,4 +482,154 @@ model Setting {
   key       String   @id
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Test management (modelled on Azure Test Plans)
+// ---------------------------------------------------------------------------
+
+// Separate from Project so that older code and this migration can ship in either order.
+model TestCounter {
+  projectId String  @id
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  nextCase  Int     @default(0)
+  nextPlan  Int     @default(0)
+}
+
+model TestCase {
+  id               String    @id @default(cuid())
+  key              String    @unique
+  number           Int
+  projectId        String
+  project          Project   @relation(fields: [projectId], references: [id])
+  title            String
+  preconditions    String    @default("")
+  steps            Json      @default("[]") // [{ action, expected, data? }]
+  tags             Json      @default("[]") // string[]
+  priorityId       String
+  priority         Priority  @relation(fields: [priorityId], references: [id])
+  status           String    @default("DRAFT") // DRAFT | READY | DEPRECATED
+  ownerId          String?
+  owner            User?     @relation("TestCaseOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  version          Int       @default(1) // bumps when title, preconditions or steps change
+  automationStatus String    @default("NOT_AUTOMATED") // NOT_AUTOMATED | AUTOMATED | WONT_AUTOMATE
+  automationRef    String?   // e.g. tests/login.spec.ts > user signs in
+  automatedVersion Int?      // the version the automated test was written from
+  lastResult       String?   // null = not run
+  lastRunAt        DateTime?
+  tickets          TestCaseTicket[]
+  points           TestPoint[]
+  results          TestResult[]
+  deletedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([projectId, deletedAt])
+}
+
+model TestCaseTicket {
+  testCaseId String
+  ticketId   String
+  testCase   TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  ticket     Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@id([testCaseId, ticketId])
+  @@index([ticketId])
+}
+
+model TestPlan {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  number      Int
+  projectId   String
+  project     Project   @relation(fields: [projectId], references: [id])
+  name        String
+  description String    @default("")
+  status      String    @default("ACTIVE") // ACTIVE | COMPLETED
+  sprintId    String?
+  sprint      Sprint?   @relation(fields: [sprintId], references: [id], onDelete: SetNull)
+  startDate   DateTime?
+  endDate     DateTime?
+  ownerId     String?
+  owner       User?     @relation("TestPlanOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  suites      TestSuite[]
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([projectId, deletedAt])
+}
+
+// Each plan has one root suite (parentId null), as in Azure.
+model TestSuite {
+  id        String      @id @default(cuid())
+  planId    String
+  plan      TestPlan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  parentId  String?
+  parent    TestSuite?  @relation("TestSuiteTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children  TestSuite[] @relation("TestSuiteTree")
+  name      String
+  order     Int         @default(0)
+  points    TestPoint[]
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([planId])
+}
+
+// Test case + configuration in a suite: what actually gets run.
+model TestPoint {
+  id            String       @id @default(cuid())
+  suiteId       String
+  suite         TestSuite    @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  testCaseId    String
+  testCase      TestCase     @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  configuration String       @default("") // free text, e.g. Chrome; "" = none
+  testerId      String?
+  tester        User?        @relation("TestPointTester", fields: [testerId], references: [id], onDelete: SetNull)
+  order         Int          @default(0)
+  lastResult    String?
+  lastRunAt     DateTime?
+  results       TestResult[]
+
+  @@unique([suiteId, testCaseId, configuration])
+  @@index([suiteId])
+  @@index([testerId])
+  @@index([testCaseId])
+}
+
+model TestResult {
+  id           String     @id @default(cuid())
+  testCaseId   String
+  testCase     TestCase   @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  pointId      String?
+  point        TestPoint? @relation(fields: [pointId], references: [id], onDelete: SetNull)
+  outcome      String     // PASS | FAIL | BLOCKED | SKIPPED
+  source       String     @default("MANUAL") // MANUAL | AUTOMATED
+  stepResults  Json?      // snapshot: [{ action, expected, outcome, comment }]
+  notes        String     @default("")
+  buildVersion String?
+  executedById String?
+  executedBy   User?      @relation("TestResultExecutor", fields: [executedById], references: [id], onDelete: SetNull)
+  executedAt   DateTime   @default(now())
+  bugTicketId  String?
+  bugTicket    Ticket?    @relation(fields: [bugTicketId], references: [id], onDelete: SetNull)
+
+  @@index([testCaseId, executedAt])
+  @@index([pointId, executedAt])
+}
+
+// CI pipelines post test results with this token. It works ONLY on /api/test-results.
+model CiToken {
+  id         String    @id @default(cuid())
+  name       String
+  tokenHash  String    @unique
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
 }

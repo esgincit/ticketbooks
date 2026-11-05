@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { authRoute, ok } from "@/lib/api";
 import { badRequest, notFound } from "@/lib/errors";
 import { saveObject } from "@/lib/storage";
+import { assertCanViewTicket } from "@/lib/tickets/service";
 
 type Ctx = { params: Promise<{ key: string }> };
 
@@ -18,6 +19,7 @@ export const POST = authRoute(async (req, user, ctx: Ctx) => {
   const { key } = await ctx.params;
   const ticket = await db.ticket.findFirst({ where: { key: key.toUpperCase(), deletedAt: null } });
   if (!ticket) throw notFound("Ticket not found");
+  await assertCanViewTicket(user, ticket.id);
 
   const form = await req.formData().catch(() => null);
   if (!form) throw badRequest("Expected multipart form data");

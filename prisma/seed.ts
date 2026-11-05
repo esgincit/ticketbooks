@@ -52,6 +52,7 @@ async function main() {
         "ticket.create", "ticket.edit.team", "ticket.assign", "ticket.claim", "ticket.delete.team",
         "ticket.comment", "ticket.watch", "subtask.create", "report.view.team", "user.view",
         "team.view", "project.view", "project.manage", "dashboard.view", "notification.receive",
+        "testcase.manage", "testcase.execute",
       ],
     },
   });
@@ -63,6 +64,7 @@ async function main() {
       permissions: [
         "ticket.edit.assigned", "ticket.claim", "ticket.comment", "ticket.watch",
         "subtask.create", "dashboard.view", "project.view", "team.view.self", "notification.receive",
+        "testcase.manage", "testcase.execute",
       ],
     },
   });

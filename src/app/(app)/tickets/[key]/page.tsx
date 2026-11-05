@@ -19,6 +19,7 @@ import { cn, fmtDate, fmtDateTime, dueLabel, timeAgo } from "@/lib/utils";
 import CommentSection from "./comment-section";
 import ActivityTimeline from "./activity-timeline";
 import EmailThread from "./email-thread";
+import TestCasesTab from "./test-cases-tab";
 
 type UserRef = { id: string; firstName: string; lastName: string; email?: string; avatarUrl: string | null };
 type TicketDetail = {
@@ -61,7 +62,7 @@ export default function TicketPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"comments" | "activity" | "emails">("comments");
+  const [tab, setTab] = useState<"comments" | "activity" | "emails" | "tests">("comments");
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [editingDesc, setEditingDesc] = useState(false);
@@ -277,7 +278,7 @@ export default function TicketPage() {
           {/* Tabs */}
           <section className="rounded-xl border bg-card shadow-sm">
             <div className="flex border-b" role="tablist">
-              {([["comments", `Comments`], ["activity", "Activity"], ["emails", "Emails"]] as const).map(([id, label]) => (
+              {([["comments", `Comments`], ["activity", "Activity"], ["emails", "Emails"], ["tests", "Test Cases"]] as const).map(([id, label]) => (
                 <button
                   key={id}
                   role="tab"
@@ -294,6 +295,7 @@ export default function TicketPage() {
             {tab === "comments" && me && <CommentSection ticketKey={t.key} comments={data.comments as never} canComment me={me} onChange={load} />}
             {tab === "activity" && <ActivityTimeline history={data.history as never} />}
             {tab === "emails" && <EmailThread emails={data.emails} />}
+            {tab === "tests" && <TestCasesTab ticketKey={t.key} />}
           </section>
         </div>
 

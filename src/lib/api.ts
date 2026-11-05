@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { ZodSchema } from "zod";
+import { ZodType, ZodTypeDef } from "zod";
 import { AppError, badRequest, unauthorized } from "./errors";
-import { getSessionUser, SessionUser } from "./auth/session";
+import { getCiTokenUser, getSessionUser, SessionUser } from "./auth/session";
 import { can } from "./rbac";
 
 type Ctx<P> = { params: Promise<P> };
@@ -23,7 +23,8 @@ export function ok(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data as object, init);
 }
 
-export async function parseBody<T>(req: Request, schema: ZodSchema<T>): Promise<T> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- input type differs from T when a schema uses defaults
+export async function parseBody<T>(req: Request, schema: ZodType<T, ZodTypeDef, any>): Promise<T> {
   let raw: unknown;
   try {
     raw = await req.json();
@@ -63,6 +64,21 @@ export function authRoute<Args extends unknown[] = []>(
       if (!user) throw unauthorized();
       if (req) rateLimit(`u:${user.id}:${new URL(req.url).pathname}`, 300, 60_000);
       return await fn(req, user, ...args);
+    } catch (e) {
+      return errorResponse(e);
+    }
+  };
+}
+
+/** Like authRoute, but also accepts a CI token. `viaCi` tells the handler which one it got. */
+export function authOrCiRoute(fn: (req: Request, user: SessionUser, viaCi: boolean) => Promise<Response>) {
+  return async (req: Request): Promise<Response> => {
+    try {
+      const session = await getSessionUser();
+      const user = session ?? (await getCiTokenUser());
+      if (!user) throw unauthorized();
+      rateLimit(`u:${user.id}:${new URL(req.url).pathname}`, 300, 60_000);
+      return await fn(req, user, !session);
     } catch (e) {
       return errorResponse(e);
     }

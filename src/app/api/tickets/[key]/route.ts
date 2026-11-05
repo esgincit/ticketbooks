@@ -2,9 +2,8 @@ import { z } from "zod";
 import { db } from "@/lib/db";
 import { authRoute, parseBody, ok } from "@/lib/api";
 import { forbidden, notFound } from "@/lib/errors";
-import { ticketScopeFor } from "@/lib/rbac";
 import { computeSla, getSlaPolicy } from "@/lib/sla";
-import { updateTicket, archiveTicket } from "@/lib/tickets/service";
+import { updateTicket, archiveTicket, canViewTicket } from "@/lib/tickets/service";
 
 type Ctx = { params: Promise<{ key: string }> };
 
@@ -31,8 +30,7 @@ export const GET = authRoute(async (_req, user, ctx: Ctx) => {
   if (!t) throw notFound("Ticket not found");
 
   // Scope check
-  const scoped = await db.ticket.count({ where: { AND: [{ id: t.id }, ticketScopeFor(user)] } });
-  if (scoped === 0 && !(await canSeeViaComment(user.id, t.id))) throw forbidden("You do not have access to this ticket");
+  if (!(await canViewTicket(user, t.id))) throw forbidden("You do not have access to this ticket");
 
   const [comments, history, attachments] = await Promise.all([
     db.comment.findMany({
@@ -80,10 +78,6 @@ export const GET = authRoute(async (_req, user, ctx: Ctx) => {
     },
   });
 });
-
-async function canSeeViaComment(userId: string, ticketId: string): Promise<boolean> {
-  return Boolean(await db.comment.findFirst({ where: { ticketId, authorId: userId } }));
-}
 
 function canEdit(user: { permissions: string[]; id: string; managedTeamIds?: string[] }, assigneeId: string | null, reporterId: string | null): boolean {
   if (user.permissions.includes("*")) return true;

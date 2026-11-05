@@ -47,11 +47,13 @@ export const POST = publicRoute(async (req) => {
     const ticket = await db.ticket.findFirst({ where: { key: keyMatch[1].toUpperCase(), deletedAt: null } });
     if (ticket) {
       // Security: only accept replies from known users; otherwise store as email event only
-      const user = await db.user.findUnique({ where: { email: data.from.toLowerCase() } });
+      const user = await db.user.findUnique({ where: { email: data.from.toLowerCase() }, include: { role: true } });
       if (user && user.status !== "DISABLED") {
         const { addComment } = await import("@/lib/tickets/service");
+        const rolePermissions = Array.isArray(user.role.permissions) ? (user.role.permissions as string[]) : [];
         await addComment(
-          { id: user.id, firstName: user.firstName, lastName: user.lastName, permissions: ["ticket.comment"] } as never,
+          // Real team and role, so the ticket access check treats this reply like one made in the app
+          { id: user.id, firstName: user.firstName, lastName: user.lastName, teamId: user.teamId, permissions: [...rolePermissions, "ticket.comment"] } as never,
           ticket.key,
           `<p>${(data.textBody ?? "See attached HTML").replace(/</g, "&lt;").replace(/\n/g, "<br/>")}</p>`
         );

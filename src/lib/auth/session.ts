@@ -81,6 +81,35 @@ export function isCompanyEmail(email: string): boolean {
   return domains.length === 0 || domains.includes(email.split("@")[1]?.toLowerCase() ?? "");
 }
 
+/**
+ * Signs a user out everywhere: browser sessions, AI tools and CI tokens.
+ * Returns Prisma operations to run inside the same $transaction as the credential change.
+ */
+export function revokeUserCredentials(userId: string) {
+  const now = new Date();
+  return [
+    db.session.deleteMany({ where: { userId } }),
+    db.mcpToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
+    db.ciToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
+    db.passwordResetToken.deleteMany({ where: { userId } }), // unused links die too
+  ];
+}
+
+/**
+ * User behind a CI token. Deliberately separate from getSessionUser: a CI token
+ * only works on routes that ask for it, so a leaked one can't reach anything else.
+ */
+export async function getCiTokenUser(): Promise<SessionUser | null> {
+  const auth = (await headers()).get("authorization");
+  const token = auth?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  if (!token) return null;
+  const t = await db.ciToken.findUnique({ where: { tokenHash: sha256(token) }, include: { user: { include: userInclude } } });
+  if (!t || t.revokedAt || t.expiresAt < new Date()) return null;
+  if (t.user.status === "DISABLED" || !isCompanyEmail(t.user.email)) return null;
+  db.ciToken.update({ where: { id: t.id }, data: { lastUsedAt: new Date() } }).catch(() => {});
+  return toSessionUser(t.user);
+}
+
 const userInclude = { role: true, team: true, managedTeams: { select: { id: true } } } as const;
 
 async function loadMcpUser(tokenHash: string): Promise<SessionUser | null> {

@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { publicRoute, parseBody, ok } from "@/lib/api";
 import { hashPassword, sha256 } from "@/lib/auth/password";
 import { hashOtp } from "@/lib/auth/otp";
+import { revokeUserCredentials } from "@/lib/auth/session";
 
 const schema = z.object({
   email: z.string().email(),
@@ -42,7 +43,7 @@ export const POST = publicRoute(
     await db.$transaction([
       db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(newPassword), status: "ACTIVE", emailVerifiedAt: new Date() } }),
       db.otpToken.update({ where: { id: token.id }, data: { verifiedAt: new Date() } }),
-      db.session.deleteMany({ where: { userId: user.id } }),
+      ...revokeUserCredentials(user.id),
       // Also invalidate any old password reset tokens
       db.passwordResetToken.deleteMany({ where: { userId: user.id } }),
     ]);

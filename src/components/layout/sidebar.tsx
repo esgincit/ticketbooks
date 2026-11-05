@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { useState } from "react";
 import {
   LayoutDashboard, UserCheck, FolderKanban, Ticket as TicketIcon, Layers, KanbanSquare,
-  Inbox, BarChart3, Users, UsersRound, Bell, Settings, ScrollText, ChevronLeft, BookText,
+  Inbox, BarChart3, Users, UsersRound, Bell, Settings, ScrollText, ChevronLeft, BookText, ClipboardCheck, ListChecks,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -20,6 +20,8 @@ const NAV = [
     { href: "/tickets", label: "Tickets", icon: TicketIcon },
     { href: "/backlog", label: "Backlog", icon: Layers },
     { href: "/board", label: "Board", icon: KanbanSquare },
+    { href: "/test-plans", label: "Test Plans", icon: ClipboardCheck },
+    { href: "/test-cases", label: "Test Cases", icon: ListChecks },
     { href: "/reports", label: "Reports", icon: BarChart3 },
   ]},
   { section: "Organization", items: [

@@ -6,7 +6,7 @@ import { queueEmail } from "@/lib/email/send";
 import { renderEmail } from "@/lib/email/templates";
 import { APP_URL } from "@/lib/config";
 import { conflict, forbidden, notFound, badRequest } from "@/lib/errors";
-import { can } from "@/lib/rbac";
+import { can, ticketScopeFor } from "@/lib/rbac";
 import type { SessionUser } from "@/lib/auth/session";
 import { excerpt, fmtDate, stripHtml } from "@/lib/utils";
 
@@ -36,6 +36,17 @@ export async function getTicketOr404(keyOrId: string): Promise<TicketWithRefs> {
   }
   if (!t) throw notFound("Ticket not found");
   return t;
+}
+
+/** Same rule everywhere a ticket's contents are read: in the user's scope, or they have commented on it */
+export async function canViewTicket(user: SessionUser, ticketId: string): Promise<boolean> {
+  const scoped = await db.ticket.count({ where: { AND: [{ id: ticketId }, ticketScopeFor(user)] } });
+  if (scoped > 0) return true;
+  return Boolean(await db.comment.findFirst({ where: { ticketId, authorId: user.id, deletedAt: null }, select: { id: true } }));
+}
+
+export async function assertCanViewTicket(user: SessionUser, ticketId: string): Promise<void> {
+  if (!(await canViewTicket(user, ticketId))) throw forbidden("You do not have access to this ticket");
 }
 
 async function findTicketByKeyOrId(keyOrId: string) {
@@ -461,6 +472,7 @@ export async function claimTicket(actor: SessionUser, key: string) {
 
   const ticket = await findTicketByKeyOrId(key);
   if (!ticket) throw notFound("Ticket not found");
+  await assertCanViewTicket(actor, ticket.id); // claiming grants view access, so it must require it
 
   const result = await db.$transaction(async (tx) => {
     const res = await tx.ticket.updateMany({
@@ -512,6 +524,7 @@ export function extractMentions(htmlBody: string, allUsers: { id: string; firstN
 export async function addComment(actor: SessionUser, key: string, body: string, parentId?: string | null) {
   if (!can(actor, "ticket.comment") && !can(actor, "*")) throw forbidden();
   const ticket = await getTicketOr404(key);
+  await assertCanViewTicket(actor, ticket.id); // commenting grants view access, so it must require it
 
   const comment = await db.comment.create({ data: { ticketId: ticket.id, authorId: actor.id, body, parentId: parentId || null } });
   await db.ticket.update({ where: { id: ticket.id }, data: { updatedAt: new Date() } });
@@ -545,6 +558,7 @@ export async function addComment(actor: SessionUser, key: string, body: string, 
 export async function setWatching(actor: SessionUser, key: string, watching: boolean) {
   const ticket = await getTicketOr404(key);
   if (watching) {
+    await assertCanViewTicket(actor, ticket.id); // watching grants view access, so it must require it
     await db.ticketWatcher.upsert({
       where: { ticketId_userId: { ticketId: ticket.id, userId: actor.id } },
       create: { ticketId: ticket.id, userId: actor.id },
