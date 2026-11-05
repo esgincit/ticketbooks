@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { getSessionUser, isCompanyEmail, type SessionUser } from "@/lib/auth/session";
-import { createCode, isAllowedRedirectUri, originOf } from "@/lib/auth/oauth";
+import { createCode, isAllowedRedirectUri, matchesRegisteredRedirect, originOf } from "@/lib/auth/oauth";
 
 const FIELDS = ["client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "state"] as const;
 type Params = Record<(typeof FIELDS)[number], string>;
@@ -13,7 +13,7 @@ type Params = Record<(typeof FIELDS)[number], string>;
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const p = Object.fromEntries(FIELDS.map((f) => [f, url.searchParams.get(f) ?? ""])) as Params;
-  const checked = await check(p);
+  const checked = await check(p, originOf(req));
   if ("page" in checked) return checked.page;
 
   const user = await getSessionUser();
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   const form = await req.formData().catch(() => null);
   if (!form) return page("Invalid request", "Expected a form submission.", 400);
   const p = Object.fromEntries(FIELDS.map((f) => [f, String(form.get(f) ?? "")])) as Params;
-  const checked = await check(p);
+  const checked = await check(p, originOf(req));
   if ("page" in checked) return checked.page;
 
   const user = await getSessionUser();
@@ -41,6 +41,7 @@ export async function POST(req: Request) {
   if (!isCompanyEmail(user.email)) return page("Not allowed", "Only company accounts can connect AI tools.", 403);
 
   const back = new URL(p.redirect_uri);
+  back.searchParams.set("iss", originOf(req)); // RFC 9207: on every response, success or error
   if (p.state) back.searchParams.set("state", p.state);
   if (form.get("decision") !== "allow") {
     back.searchParams.set("error", "access_denied");
@@ -51,15 +52,16 @@ export async function POST(req: Request) {
   return new Response(null, { status: 303, headers: { Location: back.toString() } });
 }
 
-async function check(p: Params): Promise<{ clientName: string } | { page: Response }> {
+async function check(p: Params, issuer: string): Promise<{ clientName: string } | { page: Response }> {
   const client = p.client_id ? await db.mcpClient.findUnique({ where: { id: p.client_id } }) : null;
   if (!client) return { page: page("Unknown application", "This AI tool is not registered. Reconnect it from the tool.", 400) };
   const uris = Array.isArray(client.redirectUris) ? (client.redirectUris as string[]) : [];
   // Never redirect to an unregistered URI
   // Re-checked against the current allowlist so removing a host takes effect immediately
-  if (!uris.includes(p.redirect_uri) || !isAllowedRedirectUri(p.redirect_uri)) return { page: page("Invalid redirect", "The redirect URI does not match the registered application.", 400) };
+  if (!matchesRegisteredRedirect(uris, p.redirect_uri) || !isAllowedRedirectUri(p.redirect_uri)) return { page: page("Invalid redirect", "The redirect URI does not match the registered application.", 400) };
   if (p.response_type !== "code" || !p.code_challenge || p.code_challenge_method !== "S256") {
     const back = new URL(p.redirect_uri);
+    back.searchParams.set("iss", issuer);
     back.searchParams.set("error", "invalid_request");
     back.searchParams.set("error_description", "response_type=code and PKCE (S256) are required");
     if (p.state) back.searchParams.set("state", p.state);

@@ -15,12 +15,19 @@ export function originOf(req: Request): string {
   return new URL(req.url).origin;
 }
 
+/** Exact return addresses of known web connectors. Exact URLs, not hosts: nothing else on chatgpt.com qualifies. */
+const TRUSTED_REDIRECT_URIS = ["https://chatgpt.com/connector_platform_oauth_redirect"];
+
+const isLoopback = (u: URL) => u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+
 /**
  * Redirect URIs: http on loopback (native/CLI clients such as Claude Code, RFC 8252),
- * or https only on hosts an admin listed in MCP_ALLOWED_REDIRECT_HOSTS (e.g. "claude.ai").
+ * a known connector's exact address, or https on hosts an admin listed in
+ * MCP_ALLOWED_REDIRECT_HOSTS (e.g. "claude.ai").
  * Open https registration would let anyone phish a consent and receive the user's code.
  */
 export function isAllowedRedirectUri(uri: string): boolean {
+  if (TRUSTED_REDIRECT_URIS.includes(uri)) return true;
   try {
     const u = new URL(uri);
     if (u.hash) return false;
@@ -28,7 +35,25 @@ export function isAllowedRedirectUri(uri: string): boolean {
       const hosts = (process.env.MCP_ALLOWED_REDIRECT_HOSTS ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
       return hosts.includes(u.hostname.toLowerCase());
     }
-    return u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
+    return isLoopback(u);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Whether a request's redirect_uri is one the client registered. Must match exactly, except
+ * that local apps pick a free port on each run, so loopback may use any port (RFC 8252 section 7.3).
+ */
+export function matchesRegisteredRedirect(registered: string[], uri: string): boolean {
+  if (registered.includes(uri)) return true;
+  try {
+    const u = new URL(uri);
+    if (!isLoopback(u)) return false;
+    return registered.some((r) => {
+      const reg = new URL(r);
+      return isLoopback(reg) && reg.hostname === u.hostname && reg.pathname === u.pathname && reg.search === u.search;
+    });
   } catch {
     return false;
   }

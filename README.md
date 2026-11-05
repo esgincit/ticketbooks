@@ -227,7 +227,7 @@ The browser opens the Strike login; after signing in, the user approves the tool
 - Only signed-in Strike users can connect (OAuth 2.1 + PKCE). Disabled users lose access immediately.
 - Each tool runs the same route handler as the web app, so the AI has exactly the user's role permissions.
 - Optional `ALLOWED_EMAIL_DOMAINS="acme.com,acme.io"` restricts AI access to company email domains.
-- Self-registered clients may only redirect to `http://localhost` (CLI tools like Claude Code). Web-based clients need their callback host in `MCP_ALLOWED_REDIRECT_HOSTS` (e.g. `claude.ai` for claude.ai connectors); this blocks consent-phishing via look-alike apps.
+- Self-registered clients may only redirect to `http://localhost` or `http://127.0.0.1` on any port (CLI tools like Claude Code), or to ChatGPT's fixed address, `https://chatgpt.com/connector_platform_oauth_redirect`. Other web-based clients need their callback host in `MCP_ALLOWED_REDIRECT_HOSTS` (e.g. `claude.ai` for claude.ai connectors); this blocks consent-phishing via look-alike apps.
 - Tokens are stored hashed; access tokens last 1 hour (auto-refreshed), refresh tokens 30 days and rotate on use.
 - Connects/disconnects are audit-logged. Revoke with the `disconnect_ai_tool` tool or `DELETE /api/oauth/connections?clientId=...`.
 - Requires the `20261019000000_mcp_oauth` migration (`npx prisma migrate deploy`).
