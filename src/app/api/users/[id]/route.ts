@@ -77,6 +77,10 @@ export const PATCH = authRoute(async (req, actor, ctx: Ctx) => {
       ...(newPassword ? { passwordHash: await hashPassword(newPassword) } : {}),
     },
   });
+  // Re-enabling a user or handing back a new password must not revive old pipeline access
+  if (newPassword || data.status === "DISABLED") {
+    await db.ciToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+  }
   await db.auditLog.create({
     data: { userId: actor.id, action: data.status === "DISABLED" ? "USER_DISABLED" : "USER_UPDATED", entityType: "User", entityId: id, metadata: { fields: Object.keys(data) } },
   });

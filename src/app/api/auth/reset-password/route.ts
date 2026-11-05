@@ -23,6 +23,7 @@ export const POST = publicRoute(
       db.passwordResetToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
       // Invalidate existing sessions for safety
       db.session.deleteMany({ where: { userId: row.userId } }),
+      db.ciToken.updateMany({ where: { userId: row.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
     ]);
     await audit({ userId: row.userId, action: "PASSWORD_RESET", entityType: "User", entityId: row.userId, ip: req.headers.get("x-forwarded-for") ?? undefined });
 

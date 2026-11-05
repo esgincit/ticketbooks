@@ -14,7 +14,10 @@ export const POST = publicRoute(async (req) => {
   const user = await db.user.findUnique({ where: { id: me.id } });
   if (!user || !(await verifyPassword(body.currentPassword, user.passwordHash))) throw badRequest("Current password is incorrect");
 
-  await db.user.update({ where: { id: me.id }, data: { passwordHash: await hashPassword(body.newPassword) } });
+  await db.$transaction([
+    db.user.update({ where: { id: me.id }, data: { passwordHash: await hashPassword(body.newPassword) } }),
+    db.ciToken.updateMany({ where: { userId: me.id, revokedAt: null }, data: { revokedAt: new Date() } }),
+  ]);
   await db.auditLog.create({ data: { userId: me.id, action: "PASSWORD_CHANGED", entityType: "User", entityId: me.id } });
   return ok({ success: true });
 });

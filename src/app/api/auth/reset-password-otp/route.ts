@@ -43,6 +43,7 @@ export const POST = publicRoute(
       db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(newPassword), status: "ACTIVE", emailVerifiedAt: new Date() } }),
       db.otpToken.update({ where: { id: token.id }, data: { verifiedAt: new Date() } }),
       db.session.deleteMany({ where: { userId: user.id } }),
+      db.ciToken.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } }),
       // Also invalidate any old password reset tokens
       db.passwordResetToken.deleteMany({ where: { userId: user.id } }),
     ]);

@@ -42,7 +42,7 @@ export async function getTicketOr404(keyOrId: string): Promise<TicketWithRefs> {
 export async function canViewTicket(user: SessionUser, ticketId: string): Promise<boolean> {
   const scoped = await db.ticket.count({ where: { AND: [{ id: ticketId }, ticketScopeFor(user)] } });
   if (scoped > 0) return true;
-  return Boolean(await db.comment.findFirst({ where: { ticketId, authorId: user.id }, select: { id: true } }));
+  return Boolean(await db.comment.findFirst({ where: { ticketId, authorId: user.id, deletedAt: null }, select: { id: true } }));
 }
 
 async function findTicketByKeyOrId(keyOrId: string) {

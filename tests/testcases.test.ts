@@ -4,6 +4,8 @@ import { PrismaClient } from "@prisma/client";
 import type { SessionUser } from "@/lib/rbac";
 import * as svc from "@/lib/testcases/service";
 import { canViewTicket } from "@/lib/tickets/service";
+import { sha256 } from "@/lib/auth/password";
+import { POST as resetPassword } from "@/app/api/auth/reset-password/route";
 
 /** Integration tests against the real database, using scratch data removed afterwards. */
 const db = new PrismaClient();
@@ -198,7 +200,20 @@ describe("ticket privacy", () => {
     expect(await canViewTicket(admin, ticketId)).toBe(true);
     const comment = await db.comment.create({ data: { ticketId, authorId: viewer.id, body: "hi" } });
     expect(await canViewTicket(viewer, ticketId)).toBe(true);
+    await db.comment.update({ where: { id: comment.id }, data: { deletedAt: new Date() } });
+    expect(await canViewTicket(viewer, ticketId)).toBe(false); // a deleted comment grants nothing
     await db.comment.delete({ where: { id: comment.id } });
+  });
+
+  it("revokes CI tokens when a password is reset", async () => {
+    const future = new Date(Date.now() + 3600000);
+    const ci = await db.ciToken.create({ data: { name: "t", tokenHash: `ci-${stamp}`, userId: viewer.id, expiresAt: future } });
+    await db.passwordResetToken.create({ data: { userId: viewer.id, tokenHash: sha256(`reset-token-${stamp}`), expiresAt: future } });
+    const res = await resetPassword(new Request("http://t/api/auth/reset-password", {
+      method: "POST", body: JSON.stringify({ token: `reset-token-${stamp}`, newPassword: "a-new-password-1" }),
+    }));
+    expect((await res.json()).success).toBe(true);
+    expect((await db.ciToken.findUniqueOrThrow({ where: { id: ci.id } })).revokedAt).not.toBeNull();
   });
 });
 
