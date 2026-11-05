@@ -50,20 +50,28 @@ export function isAllowedRedirectUri(uri: string): boolean {
 }
 
 /**
- * Whether a request's redirect_uri is one the client registered. Must match exactly, except
- * that local apps pick a free port on each run, so loopback may use any port (RFC 8252 section 7.3).
+ * The address to send the user back to, or null if the client didn't register this redirect_uri.
+ * Must match exactly, except that local apps pick a free port on each run, so loopback may use
+ * any port (RFC 8252 section 7.3).
+ *
+ * "localhost" can also mean a registered 127.0.0.1 or [::1]: NextRequest.url replaces the first such
+ * address anywhere in the URL, query string included, so on a real domain http://127.0.0.1:port/ reaches
+ * us as http://localhost:port/ (next/dist/server/web/next-url.js). The registration has the real address,
+ * and returning there matters because an app listening on 127.0.0.1 may not answer on localhost.
  */
-export function matchesRegisteredRedirect(registered: string[], uri: string): boolean {
-  if (registered.includes(uri)) return true;
+export function resolveRegisteredRedirect(registered: string[], uri: string): string | null {
+  if (registered.includes(uri)) return uri;
   try {
     const u = new URL(uri);
-    if (!isLoopback(u)) return false;
-    return registered.some((r) => {
-      const reg = new URL(r);
-      return isLoopback(reg) && reg.hostname === u.hostname && reg.pathname === u.pathname && reg.search === u.search;
-    });
+    if (!isLoopback(u)) return null;
+    const samePlace = registered.map((r) => new URL(r)).filter((r) => isLoopback(r) && r.pathname === u.pathname && r.search === u.search);
+    if (samePlace.some((r) => r.hostname === u.hostname)) return uri;
+    const real = u.hostname === "localhost" ? samePlace[0] : undefined;
+    if (!real) return null;
+    u.hostname = real.hostname;
+    return u.toString();
   } catch {
-    return false;
+    return null;
   }
 }
 

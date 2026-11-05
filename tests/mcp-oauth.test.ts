@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { describe, it, expect, afterEach } from "vitest";
-import { isAllowedRedirectUri, knownConnectorName, matchesRegisteredRedirect, verifyPkce } from "@/lib/auth/oauth";
+import { NextRequest } from "next/server";
+import { isAllowedRedirectUri, knownConnectorName, resolveRegisteredRedirect, verifyPkce } from "@/lib/auth/oauth";
 import { isCompanyEmail } from "@/lib/auth/session";
 import { TOOLS } from "@/lib/mcp/tools";
 
@@ -33,6 +34,17 @@ describe("MCP OAuth helpers", () => {
     expect(isAllowedRedirectUri("http://chatgpt.com/connector_platform_oauth_redirect")).toBe(false);
   });
 
+  it("returns a 127.0.0.1 app to 127.0.0.1 even though Next rewrites it on a real domain", () => {
+    const req = new NextRequest("https://strike.example.com/api/oauth/authorize?redirect_uri=http%3A%2F%2F127.0.0.1%3A54974%2Fcallback");
+    const received = new URL(req.url).searchParams.get("redirect_uri")!;
+    expect(received).toBe("http://localhost:54974/callback"); // the Next behaviour this works around
+    expect(resolveRegisteredRedirect(["http://127.0.0.1:54974/callback"], received)).toBe("http://127.0.0.1:54974/callback");
+    expect(resolveRegisteredRedirect(["http://127.0.0.1:5555/callback"], received)).toBe("http://127.0.0.1:54974/callback");
+    expect(resolveRegisteredRedirect(["http://[::1]:5555/callback"], received)).toBe("http://[::1]:54974/callback");
+    // A client that registered localhost itself stays on localhost
+    expect(resolveRegisteredRedirect(["http://127.0.0.1:1/callback", "http://localhost:1/callback"], received)).toBe(received);
+  });
+
   it("names ChatGPT from its address, and can be switched off", () => {
     const uri = "https://chatgpt.com/connector_platform_oauth_redirect";
     expect(knownConnectorName(uri)).toBe("ChatGPT");
@@ -46,21 +58,23 @@ describe("MCP OAuth helpers", () => {
 
   it("accepts any port on the registered loopback address only", () => {
     const reg = ["http://127.0.0.1:5555/callback", "http://localhost/cb"];
-    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1:5555/callback")).toBe(true);
-    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1:61234/callback")).toBe(true);
-    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1/callback")).toBe(true);
-    expect(matchesRegisteredRedirect(reg, "http://localhost:49152/cb")).toBe(true);
+    expect(resolveRegisteredRedirect(reg, "http://127.0.0.1:5555/callback")).toBe("http://127.0.0.1:5555/callback");
+    expect(resolveRegisteredRedirect(reg, "http://127.0.0.1:61234/callback")).toBe("http://127.0.0.1:61234/callback");
+    expect(resolveRegisteredRedirect(reg, "http://127.0.0.1/callback")).toBe("http://127.0.0.1/callback");
+    expect(resolveRegisteredRedirect(reg, "http://localhost:49152/cb")).toBe("http://localhost:49152/cb");
     // Different path, host or scheme is not the registered address
-    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1:61234/other")).toBe(false);
-    expect(matchesRegisteredRedirect(reg, "http://localhost:61234/callback")).toBe(false);
-    expect(matchesRegisteredRedirect(reg, "https://127.0.0.1:61234/callback")).toBe(false);
-    expect(matchesRegisteredRedirect(reg, "http://127.0.0.1.evil.com:5555/callback")).toBe(false);
-    expect(matchesRegisteredRedirect(reg, "http://evil.com:5555/callback")).toBe(false);
-    expect(matchesRegisteredRedirect(reg, "not a url")).toBe(false);
-    // Web addresses stay exact, port included
+    expect(resolveRegisteredRedirect(reg, "http://127.0.0.1:61234/other")).toBeNull();
+    expect(resolveRegisteredRedirect(reg, "http://localhost:61234/other")).toBeNull();
+    expect(resolveRegisteredRedirect(reg, "http://127.0.0.1:61234/cb")).toBeNull();
+    expect(resolveRegisteredRedirect(reg, "https://127.0.0.1:61234/callback")).toBeNull();
+    expect(resolveRegisteredRedirect(reg, "http://127.0.0.1.evil.com:5555/callback")).toBeNull();
+    expect(resolveRegisteredRedirect(reg, "http://evil.com:5555/callback")).toBeNull();
+    expect(resolveRegisteredRedirect(reg, "not a url")).toBeNull();
+    // A web client gets no loopback, and web addresses stay exact, port included
     const web = ["https://claude.ai/cb"];
-    expect(matchesRegisteredRedirect(web, "https://claude.ai/cb")).toBe(true);
-    expect(matchesRegisteredRedirect(web, "https://claude.ai:8443/cb")).toBe(false);
+    expect(resolveRegisteredRedirect(web, "https://claude.ai/cb")).toBe("https://claude.ai/cb");
+    expect(resolveRegisteredRedirect(web, "https://claude.ai:8443/cb")).toBeNull();
+    expect(resolveRegisteredRedirect(web, "http://localhost:1/cb")).toBeNull();
   });
 
   afterEach(() => { delete process.env.ALLOWED_EMAIL_DOMAINS; delete process.env.MCP_ALLOWED_REDIRECT_HOSTS; });
