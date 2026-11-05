@@ -8,8 +8,8 @@ import { canViewTicket } from "@/lib/tickets/service";
 import type { SessionUser } from "@/lib/auth/session";
 import {
   AUTOMATION_STATUSES, CASE_STATUSES, OUTCOMES, PLAN_STATUSES,
-  buildStepResults, contentChanged, countOutcomes, isStale, suitePlacementError,
-  type Step,
+  buildStepResults, change, contentChanged, countOutcomes, isStale, stepChanges, suitePlacementError,
+  type Change, type Step,
 } from "./rules";
 
 // --- Input schemas --------------------------------------------------------------
@@ -147,6 +147,63 @@ async function resolveTickets(actor: SessionUser, projectId: string, keys: strin
 const asSteps = (v: Prisma.JsonValue) => (Array.isArray(v) ? (v as unknown as Step[]) : []);
 const withStale = <T extends { automationStatus: string; version: number; automatedVersion: number | null }>(c: T) => ({ ...c, stale: isStale(c) });
 
+const AUTOMATION_LABEL: Record<string, string> = { NOT_AUTOMATED: "Not automated", AUTOMATED: "Automated", WONT_AUTOMATE: "Manual only" };
+const statusLabel = (s: string) => s[0] + s.slice(1).toLowerCase();
+const priorityName = async (id: string) => (await db.priority.findUnique({ where: { id }, select: { name: true } }))?.name ?? "Unknown";
+const userName = async (id: string | null) => {
+  if (!id) return null;
+  const u = await db.user.findUnique({ where: { id }, select: { firstName: true, lastName: true } });
+  return u ? `${u.firstName} ${u.lastName}` : "Unknown";
+};
+
+type HistoryMeta = { changes?: Change[]; name?: string; version?: number; suiteId?: string; linked?: string[]; unlinked?: string[] };
+
+/** History is the audit trail for these records, without the IP and browser details */
+async function readHistory(actor: SessionUser, where: Prisma.AuditLogWhereInput) {
+  const rows = await db.auditLog.findMany({
+    where, orderBy: { createdAt: "desc" }, take: 100,
+    select: { id: true, action: true, entityType: true, entityId: true, metadata: true, createdAt: true, user: { select: { id: true, firstName: true, lastName: true } } },
+  });
+  const metaOf = (r: { metadata: Prisma.JsonValue }) => (r.metadata ?? {}) as HistoryMeta;
+
+  // History is visible more widely than tickets, so a key this user can't see stays hidden
+  const keys = rows.flatMap((r) => [...(metaOf(r).linked ?? []), ...(metaOf(r).unlinked ?? [])]);
+  const visible = keys.length
+    ? new Set((await db.ticket.findMany({ where: { AND: [{ key: { in: keys } }, ticketScopeFor(actor)] }, select: { key: true } })).map((t) => t.key))
+    : new Set<string>();
+
+  return rows.map((r) => {
+    const m = metaOf(r);
+    return {
+      id: r.id, action: r.action, createdAt: r.createdAt, user: r.user, subject: m.name ?? null, version: m.version ?? null,
+      suiteId: m.suiteId ?? (r.entityType === "TestSuite" ? r.entityId : null),
+      changes: [
+        ...(m.changes ?? []),
+        ...(m.linked ?? []).filter((k) => visible.has(k)).map((k): Change => ({ field: "Linked ticket", from: null, to: k })),
+        ...(m.unlinked ?? []).filter((k) => visible.has(k)).map((k): Change => ({ field: "Linked ticket", from: k, to: null })),
+      ],
+    };
+  });
+}
+
+export async function caseHistory(actor: SessionUser, key: string) {
+  const c = await getCaseOr404(key);
+  return { history: await readHistory(actor, { entityType: "TestCase", entityId: c.id }) };
+}
+
+/** The plan and all its suites, including suites since deleted */
+export async function planHistory(actor: SessionUser, key: string) {
+  const plan = await getPlanOr404(key);
+  return {
+    history: await readHistory(actor, {
+      OR: [
+        { entityType: "TestPlan", entityId: plan.id },
+        { entityType: { in: ["TestSuite", "TestPoint"] }, metadata: { path: ["plan"], equals: plan.key } },
+      ],
+    }),
+  };
+}
+
 async function getCaseOr404(key: string) {
   const c = await db.testCase.findFirst({ where: { key: key.toUpperCase(), deletedAt: null } });
   if (!c) throw notFound("Test case not found");
@@ -283,11 +340,26 @@ export async function updateCase(actor: SessionUser, key: string, patch: z.infer
     steps: (patch.steps as Step[] | undefined) ?? asSteps(before.steps),
   };
 
+  const tagsBefore = Array.isArray(before.tags) ? (before.tags as string[]) : [];
+  const changes = [
+    ...change("Title", before.title, afterContent.title),
+    ...change("Preconditions", before.preconditions, afterContent.preconditions),
+    ...stepChanges(beforeContent.steps, afterContent.steps),
+    ...(patch.tags ? change("Tags", tagsBefore.join(", "), [...new Set(patch.tags)].join(", ")) : []),
+    ...(patch.status ? change("Status", statusLabel(before.status), statusLabel(patch.status)) : []),
+    ...(patch.priorityId && patch.priorityId !== before.priorityId ? change("Priority", await priorityName(before.priorityId), await priorityName(patch.priorityId)) : []),
+    ...(patch.ownerId !== undefined && patch.ownerId !== before.ownerId ? change("Owner", await userName(before.ownerId), await userName(patch.ownerId)) : []),
+  ];
+  let linked: string[] = [];
+  let unlinked: string[] = [];
+
   const { ticketKeys: _keys, tags, ...fields } = patch;
   const updated = await db.$transaction(async (tx) => {
     if (tickets) {
       // Links to tickets the actor can't see are kept: they can't remove what they can't see
-      const visible = await tx.ticket.findMany({ where: { AND: [{ testCaseLinks: { some: { testCaseId: before.id } } }, ticketScopeFor(actor)] }, select: { id: true } });
+      const visible = await tx.ticket.findMany({ where: { AND: [{ testCaseLinks: { some: { testCaseId: before.id } } }, ticketScopeFor(actor)] }, select: { id: true, key: true } });
+      linked = tickets.filter((t) => !visible.some((v) => v.id === t.id)).map((t) => t.key);
+      unlinked = visible.filter((v) => !tickets.some((t) => t.id === v.id)).map((t) => t.key);
       await tx.testCaseTicket.deleteMany({ where: { testCaseId: before.id, ticketId: { in: visible.map((t) => t.id) } } });
       await tx.testCaseTicket.createMany({ data: tickets.map((t) => ({ testCaseId: before.id, ticketId: t.id })), skipDuplicates: true });
     }
@@ -300,7 +372,10 @@ export async function updateCase(actor: SessionUser, key: string, patch: z.infer
       },
     });
   });
-  await audit({ userId: actor.id, action: "TEST_CASE_UPDATED", entityType: "TestCase", entityId: before.id, metadata: { key: before.key, version: updated.version } });
+  // The edit form sends every field, so saving without changing anything isn't an edit
+  if (changes.length || linked.length || unlinked.length) {
+    await audit({ userId: actor.id, action: "TEST_CASE_UPDATED", entityType: "TestCase", entityId: before.id, metadata: { key: before.key, version: updated.version, changes, linked, unlinked } });
+  }
   return withStale(updated);
 }
 
@@ -325,7 +400,14 @@ export async function setAutomation(actor: SessionUser, key: string, input: z.in
     data = { automationStatus: input.automationStatus, automationRef: null, automatedVersion: null };
   }
   const updated = await db.testCase.update({ where: { id: c.id }, data });
-  await audit({ userId: actor.id, action: "TEST_CASE_AUTOMATION_SET", entityType: "TestCase", entityId: c.id, metadata: { key: c.key, status: input.automationStatus, ref: input.automationRef ?? null, version: input.version ?? null } });
+  await audit({ userId: actor.id, action: "TEST_CASE_AUTOMATION_SET", entityType: "TestCase", entityId: c.id, metadata: {
+    key: c.key, status: input.automationStatus, ref: input.automationRef ?? null, version: input.version ?? null,
+    changes: [
+      ...change("Automation", AUTOMATION_LABEL[c.automationStatus], AUTOMATION_LABEL[updated.automationStatus]),
+      ...change("Test location", c.automationRef, updated.automationRef),
+      ...change("Written from version", c.automatedVersion?.toString(), updated.automatedVersion?.toString()),
+    ],
+  } });
   return withStale(updated);
 }
 
@@ -486,7 +568,15 @@ export async function updatePlan(actor: SessionUser, key: string, patch: z.infer
     where: { id: plan.id },
     data: { ...patch, startDate: dateOf(patch.startDate), endDate: dateOf(patch.endDate) },
   });
-  await audit({ userId: actor.id, action: "TEST_PLAN_UPDATED", entityType: "TestPlan", entityId: plan.id, metadata: { key: plan.key, status: updated.status } });
+  await audit({ userId: actor.id, action: "TEST_PLAN_UPDATED", entityType: "TestPlan", entityId: plan.id, metadata: {
+    key: plan.key, status: updated.status,
+    // ponytail: other plan fields show as a plain "edited" entry; the app's page only changes status
+    changes: [
+      ...change("Name", plan.name, updated.name),
+      ...change("Description", plan.description, updated.description),
+      ...change("Status", statusLabel(plan.status), statusLabel(updated.status)),
+    ],
+  } });
   return updated;
 }
 
@@ -533,7 +623,13 @@ export async function updateSuite(actor: SessionUser, id: string, patch: z.infer
     if (error) throw badRequest(error);
   }
   const updated = await db.testSuite.update({ where: { id }, data: patch });
-  await audit({ userId: actor.id, action: "TEST_SUITE_UPDATED", entityType: "TestSuite", entityId: id, metadata: { plan: suite.plan.key } });
+  const parentName = async (parentId: string | null) => (parentId ? (await db.testSuite.findUnique({ where: { id: parentId }, select: { name: true } }))?.name : null);
+  const changes = [
+    ...change("Name", suite.name, updated.name),
+    ...(suite.parentId !== updated.parentId ? change("Inside", await parentName(suite.parentId), await parentName(updated.parentId)) : []),
+    ...change("Position", String(suite.order + 1), String(updated.order + 1)),
+  ];
+  if (changes.length) await audit({ userId: actor.id, action: "TEST_SUITE_UPDATED", entityType: "TestSuite", entityId: id, metadata: { plan: suite.plan.key, name: updated.name, changes } });
   return updated;
 }
 
@@ -547,6 +643,8 @@ export async function deleteSuite(actor: SessionUser, id: string) {
 }
 
 // --- Test points ----------------------------------------------------------------------
+
+const pointLabel = (key: string, configuration: string) => (configuration ? `${key} (${configuration})` : key);
 
 export async function addPoints(actor: SessionUser, suiteId: string, input: z.infer<typeof addPointsSchema>) {
   require_(actor, MANAGE);
@@ -566,16 +664,24 @@ export async function addPoints(actor: SessionUser, suiteId: string, input: z.in
 
   const start = await db.testPoint.count({ where: { suiteId } });
   const rows = keys.flatMap((k) => configurations.map((configuration) => ({ key: k, configuration })));
-  const { count } = await db.testPoint.createMany({
+  const created = await db.testPoint.createManyAndReturn({
     data: rows.map((r, i) => ({ suiteId, testCaseId: cases.find((c) => c.key === r.key)!.id, configuration: r.configuration, testerId: input.testerId ?? null, order: start + i })),
     skipDuplicates: true,
+    select: { testCaseId: true, configuration: true },
   });
-  await audit({ userId: actor.id, action: "TEST_POINTS_ADDED", entityType: "TestSuite", entityId: suiteId, metadata: { plan: suite.plan.key, added: count, skipped: rows.length - count } });
+  const count = created.length;
+  if (count) {
+    const added = created.map((p) => pointLabel(cases.find((c) => c.id === p.testCaseId)!.key, p.configuration));
+    await audit({
+      userId: actor.id, action: "TEST_POINTS_ADDED", entityType: "TestSuite", entityId: suiteId,
+      metadata: { plan: suite.plan.key, name: suite.name, added: count, skipped: rows.length - count, changes: change("Test cases added", null, added.join(", ")) },
+    });
+  }
   return { added: count, skipped: rows.length - count };
 }
 
 async function getPointOr404(id: string) {
-  const point = await db.testPoint.findUnique({ where: { id }, include: { suite: { include: { plan: true } } } });
+  const point = await db.testPoint.findUnique({ where: { id }, include: { suite: { include: { plan: true } }, testCase: { select: { key: true } } } });
   if (!point || point.suite.plan.deletedAt) throw notFound("Test point not found");
   return point;
 }
@@ -585,7 +691,14 @@ export async function updatePoint(actor: SessionUser, id: string, input: z.infer
   const point = await getPointOr404(id);
   assertPlanOpen(point.suite.plan);
   await assertActiveUser(input.testerId);
-  return db.testPoint.update({ where: { id }, data: { testerId: input.testerId } });
+  const updated = await db.testPoint.update({ where: { id }, data: { testerId: input.testerId } });
+  if (point.testerId !== input.testerId) {
+    await audit({
+      userId: actor.id, action: "TEST_POINT_ASSIGNED", entityType: "TestPoint", entityId: id,
+      metadata: { plan: point.suite.plan.key, suiteId: point.suiteId, name: point.suite.name, changes: change(`Tester of ${pointLabel(point.testCase.key, point.configuration)}`, await userName(point.testerId), await userName(input.testerId)) },
+    });
+  }
+  return updated;
 }
 
 export async function deletePoint(actor: SessionUser, id: string) {
@@ -593,5 +706,5 @@ export async function deletePoint(actor: SessionUser, id: string) {
   const point = await getPointOr404(id);
   assertPlanOpen(point.suite.plan);
   await db.testPoint.delete({ where: { id } });
-  await audit({ userId: actor.id, action: "TEST_POINT_REMOVED", entityType: "TestPoint", entityId: id, metadata: { plan: point.suite.plan.key } });
+  await audit({ userId: actor.id, action: "TEST_POINT_REMOVED", entityType: "TestPoint", entityId: id, metadata: { plan: point.suite.plan.key, suiteId: point.suiteId, name: point.suite.name, changes: change("Test case removed", pointLabel(point.testCase.key, point.configuration), null) } });
 }

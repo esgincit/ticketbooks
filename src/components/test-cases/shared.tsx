@@ -6,8 +6,8 @@ import { api, ApiError } from "@/lib/client";
 import { Dialog } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/field";
-import { cn } from "@/lib/utils";
-import { CASE_STATUSES, OUTCOMES, suggestOutcome, type Outcome, type OutcomeCounts, type Step } from "@/lib/testcases/rules";
+import { cn, fmtDateTime, fullName } from "@/lib/utils";
+import { CASE_STATUSES, OUTCOMES, suggestOutcome, type Change, type Outcome, type OutcomeCounts, type Step } from "@/lib/testcases/rules";
 
 export type TestMeta = {
   projects: { id: string; key: string; name: string }[];
@@ -63,6 +63,58 @@ export function OutcomeBar({ counts }: { counts: OutcomeCounts }) {
       </div>
       <p className="mt-1.5 text-xs text-muted-foreground">{counts.total === 0 ? "No test points yet" : summary.join(" · ")}</p>
     </div>
+  );
+}
+
+export type HistoryEntry = {
+  id: string; action: string; createdAt: string; subject: string | null; version: number | null; suiteId: string | null;
+  user: { id: string; firstName: string; lastName: string } | null; changes: Change[];
+};
+
+const HISTORY_VERB: Record<string, string> = {
+  TEST_CASE_CREATED: "created this test case",
+  TEST_CASE_UPDATED: "edited this test case",
+  TEST_CASE_AUTOMATION_SET: "changed the automation",
+  TEST_PLAN_CREATED: "created this plan",
+  TEST_PLAN_UPDATED: "edited this plan",
+  TEST_SUITE_CREATED: "added suite",
+  TEST_SUITE_UPDATED: "edited suite",
+  TEST_SUITE_DELETED: "deleted suite",
+  TEST_POINTS_ADDED: "added test cases to",
+  TEST_POINT_REMOVED: "removed a test case from",
+  TEST_POINT_ASSIGNED: "changed a tester in",
+};
+
+/** Who changed what and when, newest first */
+export function HistoryList({ entries }: { entries: HistoryEntry[] | null }) {
+  if (!entries) return <p className="px-4 py-6 text-sm text-destructive">Could not load the history.</p>;
+  if (entries.length === 0) return <p className="px-4 py-6 text-sm text-muted-foreground">No changes recorded yet.</p>;
+  return (
+    <ul className="divide-y">
+      {entries.map((h) => (
+        <li key={h.id} className="px-4 py-3 text-sm">
+          <p>
+            <span className="font-medium">{h.user ? fullName(h.user) : "Deleted user"}</span>{" "}
+            {HISTORY_VERB[h.action] ?? "made a change"}{h.subject ? ` ${h.subject}` : ""}
+            <span className="text-xs text-muted-foreground"> · {fmtDateTime(h.createdAt)}{h.version ? ` · Version ${h.version}` : ""}</span>
+          </p>
+          {h.changes.length > 0 && (
+            <dl className="mt-1.5 space-y-1.5 text-xs">
+              {h.changes.map((c, i) => (
+                <div key={i} className="min-w-0">
+                  <dt className="font-medium text-muted-foreground">{c.field}</dt>
+                  <dd className="whitespace-pre-wrap break-words">
+                    {c.from && <del className="text-muted-foreground">{c.from}</del>}
+                    {c.from && c.to && <span aria-hidden className="text-muted-foreground"> → </span>}
+                    {c.to && <ins className="no-underline">{c.to}</ins>}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          )}
+        </li>
+      ))}
+    </ul>
   );
 }
 

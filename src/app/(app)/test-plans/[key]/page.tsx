@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog, Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Skeleton } from "@/components/ui/field";
 import { useToast } from "@/components/providers";
-import { AutomationBadge, OutcomeBadge, OutcomeBar, RunDialog, errorText, useTestMeta, type RunTarget, type TestPermissions } from "@/components/test-cases/shared";
+import { AutomationBadge, HistoryList, OutcomeBadge, OutcomeBar, RunDialog, errorText, useTestMeta, type HistoryEntry, type RunTarget, type TestPermissions } from "@/components/test-cases/shared";
 import { cn, fullName } from "@/lib/utils";
 import type { OutcomeCounts, Step } from "@/lib/testcases/rules";
 
@@ -40,10 +40,16 @@ export default function TestPlanPage() {
   const [adding, setAdding] = useState(false);
   const [suiteForm, setSuiteForm] = useState<{ id?: string; name: string; parentId: string } | null>(null);
   const [confirm, setConfirm] = useState<"plan" | "suite" | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[] | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setData(await api<Detail>(`/api/test-plans/${key}`));
+      const [detail, changes] = await Promise.all([
+        api<Detail>(`/api/test-plans/${key}`),
+        api<{ history: HistoryEntry[] }>(`/api/test-plans/${key}/history`).catch(() => null),
+      ]);
+      setData(detail);
+      setHistory(changes?.history ?? null);
     } catch (e) {
       setError(errorText(e, "Failed to load test plan"));
     }
@@ -167,12 +173,8 @@ export default function TestPlanPage() {
             <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={mine} onChange={(e) => setMine(e.target.checked)} /> Assigned to me</label>
             {canEdit && (
               <>
-                {selected.parentId && (
-                  <>
-                    <Button size="icon" variant="ghost" aria-label={`Edit suite ${selected.name}`} onClick={() => setSuiteForm({ id: selected.id, name: selected.name, parentId: selected.parentId! })}><Pencil className="h-3.5 w-3.5" /></Button>
-                    <Button size="icon" variant="ghost" aria-label={`Delete suite ${selected.name}`} onClick={() => setConfirm("suite")}><Trash2 className="h-3.5 w-3.5" /></Button>
-                  </>
-                )}
+                <Button size="icon" variant="ghost" aria-label={`Edit suite ${selected.name}`} onClick={() => setSuiteForm({ id: selected.id, name: selected.name, parentId: selected.parentId ?? "" })}><Pencil className="h-3.5 w-3.5" /></Button>
+                {selected.parentId && <Button size="icon" variant="ghost" aria-label={`Delete suite ${selected.name}`} onClick={() => setConfirm("suite")}><Trash2 className="h-3.5 w-3.5" /></Button>}
                 <Button size="sm" onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> Add test cases</Button>
               </>
             )}
@@ -249,6 +251,11 @@ export default function TestPlanPage() {
         </section>
       </div>
 
+      <section className="rounded-xl border bg-card shadow-sm">
+        <h2 className="border-b px-4 py-3 text-sm font-semibold">{selected.parentId ? `History of ${selected.name}` : "Plan and suite history"}</h2>
+        <HistoryList entries={history && (selected.parentId ? history.filter((h) => h.suiteId === selected.id) : history)} />
+      </section>
+
       <Dialog open={Boolean(suiteForm)} onClose={() => setSuiteForm(null)} title={suiteForm?.id ? "Edit suite" : "New suite"}>
         {suiteForm && (
           <form onSubmit={saveSuite} className="space-y-4 px-5 py-4">
@@ -256,12 +263,15 @@ export default function TestPlanPage() {
               <Label htmlFor="suite-name" required>Name</Label>
               <Input id="suite-name" value={suiteForm.name} onChange={(e) => setSuiteForm({ ...suiteForm, name: e.target.value })} minLength={2} maxLength={120} required />
             </div>
-            <div>
-              <Label htmlFor="suite-parent">Inside</Label>
-              <Select id="suite-parent" value={suiteForm.parentId} onChange={(e) => setSuiteForm({ ...suiteForm, parentId: e.target.value })}>
-                {parentOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-              </Select>
-            </div>
+            {/* The root suite has an empty parent here: it can be renamed but not moved */}
+            {suiteForm.parentId && (
+              <div>
+                <Label htmlFor="suite-parent">Inside</Label>
+                <Select id="suite-parent" value={suiteForm.parentId} onChange={(e) => setSuiteForm({ ...suiteForm, parentId: e.target.value })}>
+                  {parentOptions.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </Select>
+              </div>
+            )}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="ghost" onClick={() => setSuiteForm(null)}>Cancel</Button>
               <Button type="submit">{suiteForm.id ? "Save" : "Add suite"}</Button>

@@ -353,3 +353,93 @@ describe("test plans", () => {
     }
   });
 });
+
+describe("history", () => {
+  const editor = () => ({ ...viewer, permissions: ["testcase.manage"] });
+
+  it("lets someone else edit a case, and records who changed what", async () => {
+    const c = await newCase({ title: "Sign in works", tags: ["smoke"] });
+    await svc.updateCase(editor(), c.key, {
+      title: "Sign in still works", tags: ["smoke", "login"], status: "READY",
+      steps: [steps[0], { action: "Press submit", expected: "Dashboard shows" }, { action: "Sign out", expected: "" }],
+    });
+    const { history } = await svc.caseHistory(writer, c.key);
+    expect(history.map((h) => [h.action, h.user?.id])).toEqual([["TEST_CASE_UPDATED", viewer.id], ["TEST_CASE_CREATED", writer.id]]);
+    expect(history[0].version).toBe(2);
+    expect(history[0].changes).toEqual([
+      { field: "Title", from: "Sign in works", to: "Sign in still works" },
+      { field: "Step 2", from: "Submit\nExpected: Dashboard shows", to: "Press submit\nExpected: Dashboard shows" },
+      { field: "Step 3", from: null, to: "Sign out" },
+      { field: "Tags", from: "smoke", to: "smoke, login" },
+      { field: "Status", from: "Draft", to: "Ready" },
+    ]);
+  });
+
+  it("names the owner and priority rather than their IDs", async () => {
+    const c = await newCase();
+    const other = await db.priority.findFirstOrThrow({ where: { id: { not: c.priorityId } } });
+    await svc.updateCase(editor(), c.key, { ownerId: viewer.id, priorityId: other.id });
+    const [latest] = (await svc.caseHistory(writer, c.key)).history;
+    expect(latest.changes.find((x) => x.field === "Priority")?.to).toBe(other.name);
+    expect(latest.changes.find((x) => x.field === "Owner")).toEqual({ field: "Owner", from: "T writer", to: "T viewer" });
+  });
+
+  it("adds nothing when a save changes nothing", async () => {
+    const c = await newCase();
+    await svc.updateCase(editor(), c.key, { title: c.title, steps, status: c.status as "DRAFT", tags: [] });
+    expect((await svc.caseHistory(writer, c.key)).history.map((h) => h.action)).toEqual(["TEST_CASE_CREATED"]);
+  });
+
+  it("shows a linked ticket's key only to people who can see that ticket", async () => {
+    const c = await newCase();
+    await svc.updateCase(admin, c.key, { ticketKeys: [ticketKey] });
+    const shown = async (who: SessionUser) => (await svc.caseHistory(who, c.key)).history[0].changes;
+    expect(await shown(admin)).toEqual([{ field: "Linked ticket", from: null, to: ticketKey }]);
+    expect(await shown(writer)).toEqual([]);
+  });
+
+  it("does not expose the IP or browser recorded in the audit log", async () => {
+    const c = await newCase();
+    const entry = (await svc.caseHistory(viewer, c.key)).history[0];
+    expect(entry).not.toHaveProperty("ip");
+    expect(entry).not.toHaveProperty("userAgent");
+  });
+
+  it("records suite changes under the plan, including the root suite and deleted suites", async () => {
+    const plan = await svc.createPlan(writer, { projectId, name: "History plan" });
+    const root = (await svc.getPlan(writer, plan.key)).suites[0];
+    await svc.updateSuite(editor(), root.id, { name: "Renamed root" });
+
+    const suite = await svc.createSuite(writer, plan.key, { name: "Checkout" });
+    await svc.updateSuite(editor(), suite.id, { name: "Payment" });
+    const c = await newCase();
+    await svc.addPoints(editor(), suite.id, { testCaseKeys: [c.key], configurations: ["Chrome"] });
+    await svc.addPoints(editor(), suite.id, { testCaseKeys: [c.key], configurations: ["Chrome"] }); // duplicate: nothing happened
+    const { points } = await svc.getPlan(writer, plan.key);
+    await svc.updatePoint(editor(), points[0].id, { testerId: writer.id });
+    await svc.deletePoint(editor(), points[0].id);
+    await svc.deleteSuite(writer, suite.id);
+
+    const { history } = await svc.planHistory(viewer, plan.key);
+    const of = (action: string) => history.filter((h) => h.action === action);
+    expect(of("TEST_SUITE_UPDATED").map((h) => h.changes)).toEqual([
+      [{ field: "Name", from: "Checkout", to: "Payment" }],
+      [{ field: "Name", from: "History plan", to: "Renamed root" }],
+    ]);
+    expect(of("TEST_SUITE_UPDATED")[0].user?.id).toBe(viewer.id);
+    expect(of("TEST_POINTS_ADDED")).toHaveLength(1);
+    expect(of("TEST_POINTS_ADDED")[0].changes).toEqual([{ field: "Test cases added", from: null, to: `${c.key} (Chrome)` }]);
+    expect(of("TEST_POINT_ASSIGNED")[0].changes).toEqual([{ field: `Tester of ${c.key} (Chrome)`, from: null, to: "T writer" }]);
+    expect(of("TEST_POINT_REMOVED")[0].changes).toEqual([{ field: "Test case removed", from: `${c.key} (Chrome)`, to: null }]);
+    expect(of("TEST_SUITE_DELETED")[0].suiteId).toBe(suite.id);
+    expect(history.filter((h) => h.suiteId === suite.id)).toHaveLength(6);
+    // Another plan's history stays separate
+    const other = await svc.createPlan(writer, { projectId, name: "Other plan" });
+    expect((await svc.planHistory(viewer, other.key)).history.map((h) => h.action)).toEqual(["TEST_PLAN_CREATED"]);
+  });
+
+  it("still refuses people whose role has no test permission", async () => {
+    const c = await newCase();
+    await expect(svc.updateCase(viewer, c.key, { title: "Nope nope" })).rejects.toThrow();
+  });
+});
