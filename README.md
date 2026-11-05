@@ -215,7 +215,7 @@ On self-hosted/long-running servers no cron is needed; the workers start automat
 
 ## AI tools (MCP server)
 
-Strike exposes a remote MCP server at `/api/mcp` so Claude Code (or any MCP client) can do everything the web app does: tickets, comments, attachments, projects, teams, users, notifications, reports, audit, settings and test management (64 tools, `src/lib/mcp/tools.ts`).
+Strike exposes a remote MCP server at `/api/mcp` so Claude Code (or any MCP client) can do everything the web app does: tickets, comments, attachments, projects, teams, users, notifications, reports, audit, settings and test management (66 tools, `src/lib/mcp/tools.ts`).
 
 ```bash
 claude mcp add --transport http strike https://<your-domain>/api/mcp
@@ -234,11 +234,11 @@ The browser opens the Strike login; after signing in, the user approves the tool
 
 ## Test management
 
-Modelled on Azure Test Plans: a project has a library of **test cases**, and **test plans** that organise them into nested **suites**. Adding a case to a suite creates a **test point** for each configuration (Chrome, Edge), and each run adds a **result**. Pages: `/test-cases`, `/test-plans`, and a Test Cases tab on tickets. Permissions: `testcase.manage` to write and organise, `testcase.execute` to run; anyone signed in can read.
+Modelled on Azure Test Plans: a project has a library of **test cases**, and **test plans** that organise them into nested **suites**. Adding a case to a suite creates a **test point** for each configuration (Chrome, Edge), and each run adds a **result**. Pages: `/test-cases`, `/test-plans`, and a Test Cases tab on tickets. Permissions: `testcase.manage` to write and organise, `testcase.execute` to run; anyone signed in can read. Every default role has both, with no owner check, so anyone can edit anyone's cases and suites. Each case and plan has a history of who changed what, kept in the audit log.
 
 ### Generating Playwright tests with Claude
 
-Connect the MCP server above from the repo that holds your Playwright tests, then ask Claude to automate the ready test cases. It uses 19 test tools (64 tools in total), and their descriptions explain the mapping:
+Connect the MCP server above from the repo that holds your Playwright tests, then ask Claude to automate the ready test cases. It uses 21 test tools (66 tools in total), and their descriptions explain the mapping:
 
 1. `list_test_cases` with `status=READY`, `automationStatus=NOT_AUTOMATED`, `includeSteps=true` returns the work.
 2. Each case becomes one test titled `<KEY>: <title>`, each step one `test.step`, with the expected result as its assertions.

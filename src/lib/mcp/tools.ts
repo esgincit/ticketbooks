@@ -33,6 +33,8 @@ import * as emailTest from "@/app/api/settings/email/test/route";
 import * as connections from "@/app/api/oauth/connections/route";
 import * as testCases from "@/app/api/test-cases/route";
 import * as testCase from "@/app/api/test-cases/[key]/route";
+import * as testCaseHistory from "@/app/api/test-cases/[key]/history/route";
+import * as testPlanHistory from "@/app/api/test-plans/[key]/history/route";
 import * as testAutomation from "@/app/api/test-cases/[key]/automation/route";
 import * as testResults from "@/app/api/test-results/route";
 import * as testPlans from "@/app/api/test-plans/route";
@@ -284,6 +286,7 @@ export const TOOLS: Tool[] = [
     },
   },
   { name: "get_test_case", description: `Full test case: steps, tags, version, automation link, visible linked tickets, plans using it and the last 50 results. ${PLAYWRIGHT_GUIDE}`, method: "GET", handler: testCase.GET, path: "/api/test-cases/{key}", props: TC_KEY, required: ["key"] },
+  { name: "get_test_case_history", description: "Who changed a test case and what changed, newest first (last 100).", method: "GET", handler: testCaseHistory.GET, path: "/api/test-cases/{key}/history", props: TC_KEY, required: ["key"] },
   {
     name: "create_test_case", description: "Create a test case in a project's library (needs testcase.manage). Status defaults to DRAFT; set READY when it can be run or automated. Never put real secrets in steps: name an environment variable instead.",
     method: "POST", handler: testCases.POST, path: "/api/test-cases",
@@ -316,6 +319,7 @@ export const TOOLS: Tool[] = [
   { name: "delete_test_plan", description: "Delete a test plan (needs testcase.manage). Test cases and their results are kept.", method: "DELETE", handler: testPlan.DELETE, path: "/api/test-plans/{key}", props: TP_KEY, required: ["key"] },
   { name: "create_test_suite", description: "Add a suite to a test plan (needs testcase.manage). Without parentId it goes under the root suite.", method: "POST", handler: testPlanSuites.POST, path: "/api/test-plans/{key}/suites", props: { ...TP_KEY, name: str("Name"), parentId: str("Parent suite ID") }, required: ["key", "name"] },
   { name: "update_test_suite", description: "Rename, move or reorder a suite (needs testcase.manage).", method: "PATCH", handler: testSuite.PATCH, path: "/api/test-suites/{id}", props: { id: str("Suite ID"), name: str("Name"), parentId: str("New parent suite ID"), order: int("Position among siblings") }, required: ["id"] },
+  { name: "get_test_plan_history", description: "Who changed a test plan and its suites, and what changed, newest first (last 100). Entries for a suite carry its suiteId, including suites since deleted.", method: "GET", handler: testPlanHistory.GET, path: "/api/test-plans/{key}/history", props: TP_KEY, required: ["key"] },
   { name: "delete_test_suite", description: "Delete a suite, its child suites and their test points (needs testcase.manage). Test cases and results are kept.", method: "DELETE", handler: testSuite.DELETE, path: "/api/test-suites/{id}", props: { id: str("Suite ID") }, required: ["id"] },
   {
     name: "add_test_cases_to_suite", description: "Add test cases to a suite, creating one test point per case and configuration (needs testcase.manage). Duplicates are skipped.",

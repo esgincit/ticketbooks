@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Skeleton } from "@/components/ui/field";
 import { PriorityBadge } from "@/components/tickets/badges";
 import { useToast } from "@/components/providers";
-import { AutomationBadge, CaseFormDialog, CaseStatusBadge, OutcomeBadge, RunDialog, errorText, useTestMeta, type RunTarget, type TestPermissions } from "@/components/test-cases/shared";
+import { AutomationBadge, CaseFormDialog, CaseStatusBadge, HistoryList, OutcomeBadge, RunDialog, errorText, useTestMeta, type HistoryEntry, type RunTarget, type TestPermissions } from "@/components/test-cases/shared";
 import { fmtDateTime, fullName } from "@/lib/utils";
 import type { Step, StepResult } from "@/lib/testcases/rules";
 
@@ -41,10 +41,16 @@ export default function TestCasePage() {
   const [editing, setEditing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [run, setRun] = useState<RunTarget | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[] | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setData(await api<Detail>(`/api/test-cases/${key}`));
+      const [detail, changes] = await Promise.all([
+        api<Detail>(`/api/test-cases/${key}`),
+        api<{ history: HistoryEntry[] }>(`/api/test-cases/${key}/history`).catch(() => null),
+      ]);
+      setData(detail);
+      setHistory(changes?.history ?? null);
     } catch (e) {
       setError(errorText(e, "Failed to load test case"));
     }
@@ -157,6 +163,11 @@ export default function TestCasePage() {
                 ))}
               </ul>
             )}
+          </section>
+
+          <section className="rounded-xl border bg-card shadow-sm">
+            <h2 className="border-b px-4 py-3 text-sm font-semibold">History</h2>
+            <HistoryList entries={history} />
           </section>
         </div>
 

@@ -25,6 +25,25 @@ export function contentChanged(before: CaseContent, after: CaseContent): boolean
   return contentKey(before) !== contentKey(after);
 }
 
+/** One changed field in a history entry. Long values are clipped: history says what changed, it isn't a backup. */
+export type Change = { field: string; from: string | null; to: string | null };
+const clip = (s: string) => (s.length > 500 ? `${s.slice(0, 500)}…` : s);
+
+export function change(field: string, from: string | null | undefined, to: string | null | undefined): Change[] {
+  const a = from || null;
+  const b = to || null;
+  return a === b ? [] : [{ field, from: a && clip(a), to: b && clip(b) }];
+}
+
+const stepText = (s: Step) => [s.action, s.expected && `Expected: ${s.expected}`, s.data && `Data: ${s.data}`].filter(Boolean).join("\n");
+
+/** Compared by position, so moving a step shows as a change to each position it affects */
+export function stepChanges(before: Step[], after: Step[]): Change[] {
+  return Array.from({ length: Math.max(before.length, after.length) }, (_, i) =>
+    change(`Step ${i + 1}`, before[i] && stepText(before[i]), after[i] && stepText(after[i]))
+  ).flat();
+}
+
 /** Snapshot of steps with their outcomes, so history stays correct after the case is edited */
 export function buildStepResults(steps: Step[], input: StepInput[]): StepResult[] | null {
   if (input.length !== steps.length) return null;
