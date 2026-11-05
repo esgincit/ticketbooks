@@ -18,6 +18,11 @@ export const POST = publicRoute(
     if (!row || row.usedAt || row.expiresAt < new Date()) {
       return ok({ success: false, reason: "This reset link is invalid or has expired. Please request a new one." });
     }
+    // A reset activates invited users, but must never re-enable a disabled account
+    const user = await db.user.findUnique({ where: { id: row.userId }, select: { status: true } });
+    if (!user || user.status === "DISABLED") {
+      return ok({ success: false, reason: "Account is disabled." });
+    }
 
     await db.$transaction([
       db.user.update({ where: { id: row.userId }, data: { passwordHash: await hashPassword(body.newPassword), status: "ACTIVE", emailVerifiedAt: new Date() } }),

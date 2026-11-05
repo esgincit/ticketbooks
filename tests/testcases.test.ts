@@ -235,6 +235,20 @@ describe("ticket privacy", () => {
     expect((await db.mcpToken.findUniqueOrThrow({ where: { id: mcp.id } })).revokedAt).not.toBeNull();
     expect(await db.session.count({ where: { userId: viewer.id } })).toBe(0);
     await db.mcpClient.delete({ where: { id: client.id } });
+    expect(await db.passwordResetToken.count({ where: { userId: viewer.id } })).toBe(0);
+  });
+
+  it("won't let a reset link re-enable a disabled account", async () => {
+    const raw = `disabled-token-${stamp}`;
+    await db.user.update({ where: { id: viewer.id }, data: { status: "DISABLED" } });
+    await db.passwordResetToken.create({ data: { userId: viewer.id, tokenHash: sha256(raw), expiresAt: new Date(Date.now() + 3600000) } });
+    const res = await resetPassword(new Request("http://t/api/auth/reset-password", {
+      method: "POST", body: JSON.stringify({ token: raw, newPassword: "a-new-password-2" }),
+    }));
+    expect((await res.json()).success).toBe(false);
+    expect((await db.user.findUniqueOrThrow({ where: { id: viewer.id } })).status).toBe("DISABLED");
+    await db.passwordResetToken.deleteMany({ where: { userId: viewer.id } });
+    await db.user.update({ where: { id: viewer.id }, data: { status: "ACTIVE" } });
   });
 });
 

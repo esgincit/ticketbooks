@@ -91,6 +91,7 @@ export function revokeUserCredentials(userId: string) {
     db.session.deleteMany({ where: { userId } }),
     db.mcpToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
     db.ciToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
+    db.passwordResetToken.deleteMany({ where: { userId } }), // unused links die too
   ];
 }
 
