@@ -24,6 +24,8 @@ export const PERMISSION_CATALOG: { key: string; label: string; description: stri
   { key: "audit.view", label: "View audit logs", description: "Access the audit trail" },
   { key: "settings.manage", label: "Manage settings", description: "Org settings, email config, templates" },
   { key: "notification.receive", label: "Notifications", description: "Receive in-app notifications" },
+  { key: "testcase.manage", label: "Manage tests", description: "Create, edit and delete test cases, plans and suites; assign testers" },
+  { key: "testcase.execute", label: "Run tests", description: "Record test results and link automated tests" },
 ];
 
 export const NOTIF_TYPES = {

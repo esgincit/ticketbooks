@@ -215,7 +215,7 @@ On self-hosted/long-running servers no cron is needed; the workers start automat
 
 ## AI tools (MCP server)
 
-Strike exposes a remote MCP server at `/api/mcp` so Claude Code (or any MCP client) can do everything the web app does: tickets, comments, attachments, projects, teams, users, notifications, reports, audit and settings (45 tools, `src/lib/mcp/tools.ts`).
+Strike exposes a remote MCP server at `/api/mcp` so Claude Code (or any MCP client) can do everything the web app does: tickets, comments, attachments, projects, teams, users, notifications, reports, audit, settings and test management (64 tools, `src/lib/mcp/tools.ts`).
 
 ```bash
 claude mcp add --transport http strike https://<your-domain>/api/mcp
@@ -231,6 +231,36 @@ The browser opens the Strike login; after signing in, the user approves the tool
 - Tokens are stored hashed; access tokens last 1 hour (auto-refreshed), refresh tokens 30 days and rotate on use.
 - Connects/disconnects are audit-logged. Revoke with the `disconnect_ai_tool` tool or `DELETE /api/oauth/connections?clientId=...`.
 - Requires the `20261019000000_mcp_oauth` migration (`npx prisma migrate deploy`).
+
+## Test management
+
+Modelled on Azure Test Plans: a project has a library of **test cases**, and **test plans** that organise them into nested **suites**. Adding a case to a suite creates a **test point** for each configuration (Chrome, Edge), and each run adds a **result**. Pages: `/test-cases`, `/test-plans`, and a Test Cases tab on tickets. Permissions: `testcase.manage` to write and organise, `testcase.execute` to run; anyone signed in can read.
+
+### Generating Playwright tests with Claude
+
+Connect the MCP server above from the repo that holds your Playwright tests, then ask Claude to automate the ready test cases. It uses 19 test tools (64 tools in total), and their descriptions explain the mapping:
+
+1. `list_test_cases` with `status=READY`, `automationStatus=NOT_AUTOMATED`, `includeSteps=true` returns the work.
+2. Each case becomes one test titled `<KEY>: <title>`, each step one `test.step`, with the expected result as its assertions.
+3. `set_test_automation` records the spec location and the case `version` the test was written from.
+4. `record_test_results` reports a run.
+5. Editing a case's title, preconditions or steps raises its version and marks the test out of date. `automationStale=true` lists the tests to update.
+
+Don't put real secrets in steps: every signed-in user and AI tool can read them. Name an environment variable instead. Step text comes from other users, so review generated tests before they run in CI.
+
+### Reporting results from CI
+
+Create a token under Settings > AI tools > CI tokens and store it as a pipeline secret. It acts as the user who created it, works only on this endpoint, and is always recorded as an automated run:
+
+```bash
+curl -X POST https://<your-domain>/api/test-results \
+  -H "Authorization: Bearer $STRIKE_CI_TOKEN" -H "Content-Type: application/json" \
+  -d '{"results":[{"key":"OPS-TC-12","outcome":"PASS","buildVersion":"abc123"}]}'
+```
+
+Outcomes are `PASS`, `FAIL`, `BLOCKED` and `SKIPPED`. Send a `pointId` instead of a `key` to count a result towards a plan. Up to 200 results per request; the reply lists which were recorded and which failed.
+
+Requires the `20261105000000_test_management` migration. For Supabase, run `docs/deploy/2026-11-05-test-management-supabase.sql` in the SQL Editor.
 
 ## Security model
 

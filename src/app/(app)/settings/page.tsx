@@ -447,6 +447,96 @@ function SecurityTab() {
   );
 }
 
+function CiTokensSection() {
+  const [rows, setRows] = useState<{ id: string; name: string; expiresAt: string; lastUsedAt: string | null }[] | null>(null);
+  const [name, setName] = useState("");
+  const [days, setDays] = useState("90");
+  const [created, setCreated] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const { toast } = useToast();
+  const origin = typeof window === "undefined" ? "" : window.location.origin;
+
+  const load = () => api<{ tokens: NonNullable<typeof rows> }>("/api/ci-tokens").then((d) => setRows(d.tokens)).catch(() => setRows([]));
+  useEffect(() => { void load(); }, []);
+
+  const create = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const d = await api<{ token: string }>("/api/ci-tokens", { method: "POST", json: { name: name.trim(), expiresInDays: Number(days) } });
+      setCreated(d.token);
+      setName("");
+      await load();
+    } catch (err) {
+      toast({ title: err instanceof ApiError ? err.message : "Failed", variant: "error" });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const revoke = async (id: string) => {
+    try {
+      await api(`/api/ci-tokens?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      toast({ title: "Token revoked", variant: "success" });
+      await load();
+    } catch (err) {
+      toast({ title: err instanceof ApiError ? err.message : "Failed", variant: "error" });
+    }
+  };
+
+  return (
+    <section className="rounded-xl border bg-card p-5 shadow-sm">
+      <h2 className="mb-2 text-sm font-semibold">CI tokens for test results</h2>
+      <p className="mb-3 text-xs leading-relaxed text-muted-foreground">
+        Lets a pipeline post test results as you. A token only works for posting results, not for anything else. Store it as a pipeline secret.
+      </p>
+      <form onSubmit={create} className="flex flex-wrap items-end gap-2">
+        <div className="min-w-48 flex-1">
+          <Label htmlFor="ci-name" required>Name</Label>
+          <Input id="ci-name" value={name} onChange={(e) => setName(e.target.value)} minLength={2} maxLength={80} placeholder="e.g. Playwright nightly" required />
+        </div>
+        <div className="w-32">
+          <Label htmlFor="ci-days">Expires in</Label>
+          <Select id="ci-days" value={days} onChange={(e) => setDays(e.target.value)}>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">1 year</option>
+          </Select>
+        </div>
+        <Button type="submit" loading={busy}>Create token</Button>
+      </form>
+      {created && (
+        <div role="status" className="mt-3 rounded-lg border bg-muted/50 p-3">
+          <p className="mb-2 text-xs font-medium">Copy this token now. It won't be shown again.</p>
+          <div className="flex items-center gap-2">
+            <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap font-mono text-xs">{created}</code>
+            <Button variant="secondary" onClick={() => { void navigator.clipboard?.writeText(created); toast({ title: "Copied", variant: "success" }); }}>Copy</Button>
+          </div>
+          <pre className="mt-3 overflow-x-auto font-mono text-[11px] leading-relaxed text-muted-foreground">{`curl -X POST ${origin}/api/test-results \\
+  -H "Authorization: Bearer $STRIKE_CI_TOKEN" -H "Content-Type: application/json" \\
+  -d '{"results":[{"key":"OPS-TC-12","outcome":"PASS","buildVersion":"abc123"}]}'`}</pre>
+        </div>
+      )}
+      <div className="mt-4">
+        {rows === null ? <Skeleton className="h-10" /> : rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground">You have no active CI tokens.</p>
+        ) : (
+          <ul className="divide-y">
+            {rows.map((r) => (
+              <li key={r.id} className="flex items-center gap-3 py-2.5 text-sm">
+                <span className="min-w-0 flex-1 truncate font-medium">{r.name}</span>
+                <span className="hidden text-xs text-muted-foreground sm:inline">
+                  Expires {new Date(r.expiresAt).toLocaleDateString()} · {r.lastUsedAt ? `Last used ${new Date(r.lastUsedAt).toLocaleString()}` : "Never used"}
+                </span>
+                <Button variant="secondary" onClick={() => void revoke(r.id)}>Revoke</Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function AiToolsTab() {
   const [rows, setRows] = useState<{ clientId: string; name: string; connectedAt: string }[] | null>(null);
   const { toast } = useToast();
@@ -496,6 +586,8 @@ function AiToolsTab() {
           </ul>
         )}
       </section>
+
+      <CiTokensSection />
     </div>
   );
 }
