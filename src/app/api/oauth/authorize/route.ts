@@ -79,7 +79,7 @@ function consent(p: Params, clientName: string, user: SessionUser) {
     `<h1>Allow <b>${esc(clientName)}</b> to use Strike?</h1>
      <p>The app name is self-reported. ${local
        ? "Access will be handed to an app running <b>on this computer</b>. Only allow if you just started this connection yourself (for example from Claude Code)."
-       : `Access will be sent to <b>${esc(dest.host)}</b>.`}</p>
+       : `Access will be sent to <b>${esc(dest.host)}</b>, for whichever account is signed in there. Only allow if you just started this connection yourself.`}</p>
      <p>It will act as <b>${esc(user.firstName)} ${esc(user.lastName)}</b> (${esc(user.email)}) with your <b>${esc(user.roleName)}</b> permissions:
      view, create and update tickets, comments, projects and everything else your role allows.</p>
      <form method="post" action="/api/oauth/authorize">${hidden}
