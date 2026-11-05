@@ -11,7 +11,7 @@ export const PERMISSION_CATALOG: { key: string; label: string; description: stri
   { key: "project.manage", label: "Manage projects", description: "Create/edit projects, workflows, types" },
   { key: "project.view", label: "View projects", description: "Browse projects" },
   { key: "ticket.create", label: "Create tickets", description: "Create tickets in permitted projects" },
-  { key: "ticket.edit.team", label: "Edit team tickets", description: "Edit any ticket visible to the manager's team" },
+  { key: "ticket.edit.team", label: "Edit all tickets", description: "Edit and assign any ticket, in any team" },
   { key: "ticket.edit.assigned", label: "Edit own tickets", description: "Edit tickets assigned to or reported by self" },
   { key: "ticket.assign", label: "Assign tickets", description: "Assign/reassign tickets to others" },
   { key: "ticket.claim", label: "Claim tickets", description: "Pick up unassigned tickets" },
