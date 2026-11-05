@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { getSessionUser, isCompanyEmail, type SessionUser } from "@/lib/auth/session";
-import { createCode, isAllowedRedirectUri, knownConnectorName, matchesRegisteredRedirect, originOf } from "@/lib/auth/oauth";
+import { createCode, isAllowedRedirectUri, knownConnectorName, originOf, resolveRegisteredRedirect } from "@/lib/auth/oauth";
 
 const FIELDS = ["client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "state"] as const;
 type Params = Record<(typeof FIELDS)[number], string>;
@@ -58,7 +58,9 @@ async function check(p: Params, issuer: string): Promise<{ clientName: string } 
   const uris = Array.isArray(client.redirectUris) ? (client.redirectUris as string[]) : [];
   // Never redirect to an unregistered URI
   // Re-checked against the current allowlist so removing a host takes effect immediately
-  if (!matchesRegisteredRedirect(uris, p.redirect_uri) || !isAllowedRedirectUri(p.redirect_uri)) return { page: page("Invalid redirect", "The redirect URI does not match the registered application.", 400) };
+  const redirect = resolveRegisteredRedirect(uris, p.redirect_uri);
+  if (!redirect || !isAllowedRedirectUri(redirect)) return { page: page("Invalid redirect", "The redirect URI does not match the registered application.", 400) };
+  p.redirect_uri = redirect;
   if (p.response_type !== "code" || !p.code_challenge || p.code_challenge_method !== "S256") {
     const back = new URL(p.redirect_uri);
     back.searchParams.set("iss", issuer);
