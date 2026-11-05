@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/constants";
 import { getSessionUser, isCompanyEmail, type SessionUser } from "@/lib/auth/session";
-import { createCode, isAllowedRedirectUri, matchesRegisteredRedirect, originOf } from "@/lib/auth/oauth";
+import { createCode, isAllowedRedirectUri, knownConnectorName, matchesRegisteredRedirect, originOf } from "@/lib/auth/oauth";
 
 const FIELDS = ["client_id", "redirect_uri", "response_type", "code_challenge", "code_challenge_method", "state"] as const;
 type Params = Record<(typeof FIELDS)[number], string>;
@@ -74,10 +74,12 @@ function consent(p: Params, clientName: string, user: SessionUser) {
   const hidden = FIELDS.map((f) => `<input type="hidden" name="${f}" value="${esc(p[f])}">`).join("");
   const dest = new URL(p.redirect_uri);
   const local = dest.protocol === "http:";
+  // Clients choose their own name at registration, so a known address always shows our name for it
+  const known = knownConnectorName(p.redirect_uri);
   return html(
     "Connect AI tool",
-    `<h1>Allow <b>${esc(clientName)}</b> to use Strike?</h1>
-     <p>The app name is self-reported. ${local
+    `<h1>Allow <b>${esc(known ?? clientName)}</b> to use Strike?</h1>
+     <p>${known ? "" : "The app name is self-reported. "}${local
        ? "Access will be handed to an app running <b>on this computer</b>. Only allow if you just started this connection yourself (for example from Claude Code)."
        : `Access will be sent to <b>${esc(dest.host)}</b>, for whichever account is signed in there. Only allow if you just started this connection yourself.`}</p>
      <p>It will act as <b>${esc(user.firstName)} ${esc(user.lastName)}</b> (${esc(user.email)}) with your <b>${esc(user.roleName)}</b> permissions:

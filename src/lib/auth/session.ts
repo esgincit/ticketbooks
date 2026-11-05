@@ -85,9 +85,10 @@ export function isCompanyEmail(email: string): boolean {
  * Signs a user out everywhere: browser sessions, AI tools and CI tokens.
  * Returns Prisma operations to run inside the same $transaction as the credential change.
  */
-export function revokeUserCredentials(userId: string) {
+export function revokeUserCredentials(userId: string, email: string) {
   const now = new Date();
   return [
+    db.otpToken.updateMany({ where: { email: email.toLowerCase(), verifiedAt: null }, data: { expiresAt: now } }),
     db.session.deleteMany({ where: { userId } }),
     db.mcpToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),
     db.ciToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: now } }),

@@ -81,7 +81,7 @@ export const PATCH = authRoute(async (req, actor, ctx: Ctx) => {
         passwordHash,
       },
     }),
-    ...(newPassword || data.status === "DISABLED" ? revokeUserCredentials(id) : []),
+    ...(newPassword || data.status === "DISABLED" ? revokeUserCredentials(id, target.email) : []),
   ]);
   await db.auditLog.create({
     data: { userId: actor.id, action: data.status === "DISABLED" ? "USER_DISABLED" : "USER_UPDATED", entityType: "User", entityId: id, metadata: { fields: Object.keys(data) } },

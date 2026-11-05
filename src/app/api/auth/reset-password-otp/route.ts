@@ -41,9 +41,10 @@ export const POST = publicRoute(
     }
 
     await db.$transaction([
-      db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(newPassword), status: "ACTIVE", emailVerifiedAt: new Date() } }),
+      // The status condition covers an admin disabling the user at this very moment
+      db.user.update({ where: { id: user.id, status: { not: "DISABLED" } }, data: { passwordHash: await hashPassword(newPassword), status: "ACTIVE", emailVerifiedAt: new Date() } }),
       db.otpToken.update({ where: { id: token.id }, data: { verifiedAt: new Date() } }),
-      ...revokeUserCredentials(user.id),
+      ...revokeUserCredentials(user.id, user.email),
       // Also invalidate any old password reset tokens
       db.passwordResetToken.deleteMany({ where: { userId: user.id } }),
     ]);

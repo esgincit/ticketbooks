@@ -15,8 +15,16 @@ export function originOf(req: Request): string {
   return new URL(req.url).origin;
 }
 
-/** Exact return addresses of known web connectors. Exact URLs, not hosts: nothing else on chatgpt.com qualifies. */
-const TRUSTED_REDIRECT_URIS = ["https://chatgpt.com/connector_platform_oauth_redirect"];
+const CHATGPT_REDIRECT_URI = "https://chatgpt.com/connector_platform_oauth_redirect";
+
+/**
+ * Name of the known web connector behind this exact return address, if any. Exact URL, not a host:
+ * nothing else on chatgpt.com qualifies. MCP_DISABLE_CHATGPT="true" turns it off, and takes effect
+ * for new sign-ins because authorize re-checks; connected users are removed with disconnect_ai_tool.
+ */
+export function knownConnectorName(uri: string): string | null {
+  return uri === CHATGPT_REDIRECT_URI && process.env.MCP_DISABLE_CHATGPT !== "true" ? "ChatGPT" : null;
+}
 
 const isLoopback = (u: URL) => u.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
 
@@ -27,7 +35,7 @@ const isLoopback = (u: URL) => u.protocol === "http:" && ["localhost", "127.0.0.
  * Open https registration would let anyone phish a consent and receive the user's code.
  */
 export function isAllowedRedirectUri(uri: string): boolean {
-  if (TRUSTED_REDIRECT_URIS.includes(uri)) return true;
+  if (knownConnectorName(uri)) return true;
   try {
     const u = new URL(uri);
     if (u.hash) return false;
